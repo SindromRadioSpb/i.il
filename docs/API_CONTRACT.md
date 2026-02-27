@@ -29,16 +29,108 @@ Base path:
 }
 ```
 
-- `code`: stable machine-readable code
-- `message`: short human-readable
-- `details`: optional, safe for clients (no secrets)
+- `code`: stable machine-readable code (see error code table below)
+- `message`: short human-readable description
+- `details`: optional object, safe for clients (no secrets, no internal stack traces)
+
+**Error code table**
+
+| HTTP status | `error.code` | When |
+|-------------|-------------|------|
+| 400 | `invalid_request` | Invalid query parameter (bad limit, bad cursor format) |
+| 401 | `unauthorized` | Missing or invalid `X-Admin-Secret` header |
+| 403 | `forbidden` | Admin endpoint accessed but `ADMIN_ENABLED=false` |
+| 404 | `not_found` | Story not found, or unrecognized route |
+| 500 | `internal_error` | Unhandled server error (DB failure, unexpected exception) |
+
+**Error examples**
+
+400 Bad Request:
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_request",
+    "message": "Invalid limit parameter",
+    "details": { "param": "limit", "value": "999", "max": 50 }
+  }
+}
+```
+
+401 Unauthorized:
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "unauthorized",
+    "message": "Missing or invalid admin secret",
+    "details": {}
+  }
+}
+```
+
+403 Forbidden:
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "forbidden",
+    "message": "Admin endpoints are disabled",
+    "details": {}
+  }
+}
+```
+
+404 Not Found (story):
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "not_found",
+    "message": "Story not found",
+    "details": { "story_id": "01HZ..." }
+  }
+}
+```
+
+404 Not Found (route):
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "not_found",
+    "message": "Not found",
+    "details": { "path": "/api/v1/unknown" }
+  }
+}
+```
+
+500 Internal Error:
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "internal_error",
+    "message": "An unexpected error occurred",
+    "details": {}
+  }
+}
+```
 
 ### 1.2 Pagination cursor
-Cursor is an opaque string.
-Clients must treat it as a token and not parse it.
 
-- Request: `cursor=<opaque>`
-- Response: `next_cursor=<opaque|null>`
+Cursor is an **opaque** string.
+Clients must treat it as a token and must not parse or construct it.
+
+**Encoding (internal — subject to change without notice):**
+- Current implementation: base64url-encoded JSON `{"last_update_at":"<ISO8601>","story_id":"<id>"}`
+- Clients must NOT rely on this format. Treat the cursor as a black box.
+- Max cursor length: 500 characters (validate before storing client-side)
+
+**Usage:**
+- Request with cursor: `GET /api/v1/feed?cursor=<opaque>&limit=20`
+- Response includes `next_cursor`: string (next page available) or `null` (no more pages)
+- An empty page (`stories: []`) always has `next_cursor: null`
 
 ---
 

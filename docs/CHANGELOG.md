@@ -14,6 +14,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+#### Repo Autonomy Hardening
+- `docs/AUTONOMY_CHECKLIST.md`: what user must provide vs. what agent does autonomously vs. human-required actions; Facebook and Google Cloud setup guides; pre-launch checklist
+- `docs/CONFIG_REFERENCE.md`: complete reference for all environment variables — types, defaults, valid values, secret flags, environment matrix, secret management commands
+- `docs/OPS_AUTOMATION.md`: cron schedule and pipeline breakdown, safe operation modes, manual trigger guide, health endpoint interpretation, run history queries, lock management, FB posting recovery, cost controls, monitoring checklist
+- `scripts/verify_repo.sh`: checks all required repo files are present; exit 1 on any missing
+- `scripts/verify_env.sh`: checks local dev env vars; distinguishes required vs. optional; loads `.env` automatically
+- `docs/CLAUDE_WORKFLOW.md`: expanded with risk matrix (API regression, SSRF, schema, secret exposure, FB double-post, workers-types conflict, cron overrun), session start protocol, pre/post patch checklists, commit discipline guide
+- `.agents/skills/news-pipeline/SKILL.md`: added pre/post patch checklists, risk matrix (SSRF, duplicates, API regression, log leakage), fixtures protocol
+- `.agents/skills/ts-quality/SKILL.md`: added pre/post patch checklists, risk matrix (workers-types conflict, API regression, secrets in logs), expanded DoD
+- `docs/API_CONTRACT.md`: error code table, full error response examples for all status codes (400/401/403/404/500), cursor encoding spec (opaque contract + internal format note)
+- `docs/DB_SCHEMA.md`: `snippet_he` max 500 chars, enum enforcement note (SQLite does not enforce CHECK constraints), CHECK constraint pattern recommendation, retention invariant clarified
+- `README.md`: "Autonomous setup" section with verify scripts, links to `AUTONOMY_CHECKLIST`, `CONFIG_REFERENCE`, `OPS_AUTOMATION`; expanded "Project docs" table (14 entries)
+
 #### Repository & Toolchain
 - Monorepo scaffold: pnpm workspace (`pnpm-workspace.yaml`), shared `tsconfig.base.json`
 - Root `package.json` with workspace-level scripts

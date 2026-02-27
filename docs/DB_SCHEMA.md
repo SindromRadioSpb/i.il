@@ -37,7 +37,7 @@ Required fields:
 - `published_at` (TEXT ISO8601, nullable)
 - `updated_at` (TEXT ISO8601, nullable)
 - `date_confidence` (TEXT enum: high|low, not null default low)
-- `snippet_he` (TEXT, nullable; truncated internal snippet)
+- `snippet_he` (TEXT, nullable; truncated internal snippet; **max 500 characters** enforced by code)
 - `title_hash` (TEXT, nullable)
 - `content_hash` (TEXT, nullable)
 - `ingested_at` (TEXT ISO8601, not null)
@@ -174,14 +174,30 @@ Fields:
 
 ## 3) Enums (stored as TEXT)
 
-- `date_confidence`: `high|low`
-- `item.status`: `new|existing|clustered|failed|paywalled`
-- `story.category`: `politics|security|economy|society|tech|health|culture|sport|weather|other`
-- `story.risk_level`: `low|medium|high`
-- `story.state`: `draft|published|hidden`
-- `publications.web_status`: `pending|published|failed`
-- `publications.fb_status`: `disabled|pending|posted|failed|auth_error|rate_limited`
-- `runs.status`: `success|partial_failure|failure`
+**Important: SQLite does not enforce CHECK constraints on TEXT values by default.**
+Enum validity is enforced entirely in application code, not by the database engine.
+Every enum column must be validated before INSERT/UPDATE. Tests must cover invalid value rejection.
+
+Enum definitions:
+
+| Column | Valid values |
+|--------|-------------|
+| `items.date_confidence` | `high` \| `low` |
+| `items.status` | `new` \| `existing` \| `clustered` \| `failed` \| `paywalled` |
+| `stories.category` | `politics` \| `security` \| `economy` \| `society` \| `tech` \| `health` \| `culture` \| `sport` \| `weather` \| `other` |
+| `stories.risk_level` | `low` \| `medium` \| `high` |
+| `stories.state` | `draft` \| `published` \| `hidden` |
+| `publications.web_status` | `pending` \| `published` \| `failed` |
+| `publications.fb_status` | `disabled` \| `pending` \| `posted` \| `failed` \| `auth_error` \| `rate_limited` |
+| `runs.status` | `success` \| `partial_failure` \| `failure` |
+
+**Recommended CHECK constraint pattern** (add in future migration if needed):
+```sql
+-- Example: enforce story.state values
+ALTER TABLE stories ADD CONSTRAINT chk_story_state
+  CHECK (state IN ('draft', 'published', 'hidden'));
+```
+Note: D1 (SQLite) CHECK constraints are parsed but enforcement behavior may vary. Code-level validation remains the primary guard.
 
 ---
 
@@ -204,7 +220,8 @@ Fields:
   - `run_lock.lease_until > now` blocks new work.
 
 ### 4.5 Minimal retention invariant
-- `snippet_he` must be truncated to a safe max length (enforced by code; can be validated by tests).
+- `snippet_he` must be truncated to ≤ 500 characters (enforced by code; validated by tests).
+- No column stores full article text. `summary_ru` stores only the generated Russian summary (400–700 chars target).
 
 ---
 

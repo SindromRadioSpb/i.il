@@ -214,6 +214,28 @@ See `docs/TEST_PLAN.md`.
 
 ---
 
+## Autonomous setup (Claude Code)
+
+This repo is designed for autonomous operation by Claude Code. Before any session:
+
+```bash
+bash scripts/verify_repo.sh   # all required files present
+bash scripts/verify_env.sh    # local env vars set
+bash scripts/ci.sh            # CI gate is green
+```
+
+**What the agent does autonomously:** run CI, write/update code, update docs, commit.
+
+**What requires human action:** deploy, remote DB migrations, secrets management, Facebook posting, enabling sources.
+
+See [`docs/AUTONOMY_CHECKLIST.md`](docs/AUTONOMY_CHECKLIST.md) for the full breakdown of safe vs. human-required actions.
+
+See [`docs/CONFIG_REFERENCE.md`](docs/CONFIG_REFERENCE.md) for all environment variables, defaults, and secret management commands.
+
+See [`docs/OPS_AUTOMATION.md`](docs/OPS_AUTOMATION.md) for cron operation, manual triggers, and health monitoring.
+
+---
+
 ## Deployment (manual, do not run unless requested)
 
 **Cloudflare Worker deploy:**
@@ -240,7 +262,11 @@ This repo intentionally avoids automatic “push-to-production” steps. See `do
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Secrets policy, network access rules, logging constraints |
 | [`docs/SPEC.md`](docs/SPEC.md) | Full product requirements and edge cases |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System shape, data flows, component overview |
-| [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) | Worker public API v1 contract |
+| [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) | Worker public API v1 contract (error codes, cursor encoding, full examples) |
+| [`docs/DB_SCHEMA.md`](docs/DB_SCHEMA.md) | D1 schema contract, enums, invariants, migration policy |
+| [`docs/CONFIG_REFERENCE.md`](docs/CONFIG_REFERENCE.md) | All environment variables: types, defaults, valid values, secrets |
+| [`docs/OPS_AUTOMATION.md`](docs/OPS_AUTOMATION.md) | Cron operation, safe modes, manual triggers, health monitoring |
+| [`docs/AUTONOMY_CHECKLIST.md`](docs/AUTONOMY_CHECKLIST.md) | Agent autonomy boundaries: what requires human approval |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Architectural decision records (ADR-lite) |
 | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Mandatory PR gates (tests, compliance, security, performance) |
 
