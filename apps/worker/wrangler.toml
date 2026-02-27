@@ -32,11 +32,9 @@ binding = "DB"
 database_name = "news_hub_prod"
 database_id = "32403483-6512-4673-aaff-a3a6e3c9aad3"
 
-# Explicit production vars (CRON_ENABLED and FB_POSTING_ENABLED set to false
-# until manually verified; change in dashboard or here when ready to go live)
 # ANTHROPIC_API_KEY is a secret — set via: wrangler secret put ANTHROPIC_API_KEY --env production
 [env.production.vars]
-CRON_ENABLED = "false"
+CRON_ENABLED = "true"
 FB_POSTING_ENABLED = "false"
 ADMIN_ENABLED = "false"
 CRON_INTERVAL_MIN = "10"
