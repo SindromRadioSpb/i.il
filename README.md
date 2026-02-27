@@ -229,6 +229,23 @@ This repo intentionally avoids automatic “push-to-production” steps. See `do
 
 ---
 
+## Project docs
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones v0.1 → v1.0, features, non-goals, engineering checklist |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Keep-a-Changelog record of all notable changes |
+| [`docs/BRAND.md`](docs/BRAND.md) | Brand positioning, voice & tone, disclaimers, attribution and corrections policy |
+| [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) | Summary-only rule, attribution requirements, Facebook usage policy |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Secrets policy, network access rules, logging constraints |
+| [`docs/SPEC.md`](docs/SPEC.md) | Full product requirements and edge cases |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System shape, data flows, component overview |
+| [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) | Worker public API v1 contract |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Architectural decision records (ADR-lite) |
+| [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Mandatory PR gates (tests, compliance, security, performance) |
+
+---
+
 ## License
 
 See `LICENSE`.
