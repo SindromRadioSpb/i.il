@@ -55,6 +55,109 @@ export async function createStory(
     .run();
 }
 
+// ---------------------------------------------------------------------------
+// Summary pipeline helpers
+// ---------------------------------------------------------------------------
+
+export interface StoryForSummary {
+  storyId: string;
+  riskLevel: string;
+  summaryHash: string | null;
+}
+
+export interface StoryItemForSummary {
+  itemId: string;
+  titleHe: string;
+  sourceId: string;
+  publishedAt: string | null;
+}
+
+/** Fetch draft stories that need a Russian summary generated. */
+export async function getStoriesNeedingSummary(
+  db: D1Database,
+  limit: number,
+): Promise<StoryForSummary[]> {
+  const result = await db
+    .prepare(
+      `SELECT story_id     AS storyId,
+              risk_level   AS riskLevel,
+              summary_hash AS summaryHash
+       FROM stories
+       WHERE state = 'draft'
+       ORDER BY last_update_at DESC
+       LIMIT ?`,
+    )
+    .bind(limit)
+    .all<StoryForSummary>();
+  return result.results;
+}
+
+/** Fetch the items belonging to a story, most-recent first (max 10). */
+export async function getStoryItemsForSummary(
+  db: D1Database,
+  storyId: string,
+): Promise<StoryItemForSummary[]> {
+  const result = await db
+    .prepare(
+      `SELECT i.item_id    AS itemId,
+              i.title_he   AS titleHe,
+              i.source_id  AS sourceId,
+              i.published_at AS publishedAt
+       FROM story_items si
+       JOIN items i ON i.item_id = si.item_id
+       WHERE si.story_id = ?
+       ORDER BY COALESCE(i.published_at, si.added_at) DESC
+       LIMIT 10`,
+    )
+    .bind(storyId)
+    .all<StoryItemForSummary>();
+  return result.results;
+}
+
+/**
+ * Persist the generated summary: update the story (state → published) and
+ * create/update the corresponding publications row in a single batch.
+ */
+export async function updateStorySummary(
+  db: D1Database,
+  storyId: string,
+  titleRu: string,
+  summaryRu: string,
+  summaryHash: string,
+  riskLevel: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE stories
+         SET title_ru        = ?,
+             summary_ru      = ?,
+             summary_hash    = ?,
+             summary_version = summary_version + 1,
+             risk_level      = ?,
+             state           = 'published'
+         WHERE story_id = ?`,
+      )
+      .bind(titleRu, summaryRu, summaryHash, riskLevel, storyId),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO publications (story_id, web_status, fb_status)
+         VALUES (?, 'pending', 'disabled')`,
+      )
+      .bind(storyId),
+    db
+      .prepare(
+        `UPDATE publications
+         SET web_status = 'published', web_published_at = ?
+         WHERE story_id = ?`,
+      )
+      .bind(now, storyId),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+
 /** Bump last_update_at for a story that gained a new item. */
 export async function updateStoryLastUpdate(
   db: D1Database,

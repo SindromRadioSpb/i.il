@@ -9,6 +9,7 @@ database_name = "news_hub_dev"
 database_id = "3e74b9fd-b0b3-4022-ac3d-d08306015420"
 
 # Default vars (dev defaults — safe: cron and FB disabled)
+# ANTHROPIC_API_KEY is a secret — set via: wrangler secret put ANTHROPIC_API_KEY
 [vars]
 CRON_ENABLED = "false"
 FB_POSTING_ENABLED = "false"
@@ -17,6 +18,7 @@ CRON_INTERVAL_MIN = "10"
 MAX_NEW_ITEMS_PER_RUN = "25"
 SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # Cron trigger (registered for both dev and production)
 [triggers]
@@ -32,6 +34,7 @@ database_id = "32403483-6512-4673-aaff-a3a6e3c9aad3"
 
 # Explicit production vars (CRON_ENABLED and FB_POSTING_ENABLED set to false
 # until manually verified; change in dashboard or here when ready to go live)
+# ANTHROPIC_API_KEY is a secret — set via: wrangler secret put ANTHROPIC_API_KEY --env production
 [env.production.vars]
 CRON_ENABLED = "false"
 FB_POSTING_ENABLED = "false"
@@ -40,6 +43,7 @@ CRON_INTERVAL_MIN = "10"
 MAX_NEW_ITEMS_PER_RUN = "25"
 SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 [env.production.triggers]
 crons = ["*/10 * * * *"]

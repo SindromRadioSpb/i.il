@@ -11,6 +11,10 @@ export interface Env {
   MAX_NEW_ITEMS_PER_RUN: string;
   SUMMARY_TARGET_MIN: string;
   SUMMARY_TARGET_MAX: string;
+  // Optional — set via `wrangler secret put ANTHROPIC_API_KEY`
+  ANTHROPIC_API_KEY?: string;
+  // Default: claude-haiku-4-5-20251001
+  ANTHROPIC_MODEL?: string;
 }
 
 const handler: ExportedHandler<Env> = {
