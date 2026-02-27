@@ -1,0 +1,19 @@
+---
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
+const res = await fetch(`${apiBase}/api/v1/health`);
+const health = await res.json();
+---
+
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>News Hub (HE→RU)</title>
+    <meta name="description" content="Русскоязычный хаб новостей из ивритоязычных источников." />
+    <link rel="canonical" href={import.meta.env.PUBLIC_SITE_BASE_URL ?? ''} />
+  </head>
+  <body>
+    <h1>News Hub (HE→RU)</h1>
+    <p>Worker health: <code>{JSON.stringify(health)}</code></p>
+    <p>Дальше здесь будет feed Stories (PATCH-09).</p>
+  </body>
+</html>

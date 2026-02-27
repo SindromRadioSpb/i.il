@@ -1,0 +1,12 @@
+{
+  "name": "news-hub-a1",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "lint": "pnpm -C apps/worker lint && pnpm -C apps/web lint",
+    "typecheck": "pnpm -C apps/worker typecheck && pnpm -C apps/web typecheck",
+    "test": "pnpm -C apps/worker test && pnpm -C apps/web test",
+    "dev": "echo \"Run in 2 terminals:\" && echo \"  pnpm -C apps/worker dev\" && echo \"  pnpm -C apps/web dev\""
+  }
+}

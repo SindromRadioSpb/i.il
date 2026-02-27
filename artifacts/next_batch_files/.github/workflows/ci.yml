@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  worker:
+    name: Worker (lint/typecheck/test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: "9"
+
+      - name: Install dependencies (root)
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm -C apps/worker lint
+
+      - name: Typecheck
+        run: pnpm -C apps/worker typecheck
+
+      - name: Tests
+        run: pnpm -C apps/worker test
+
+  web:
+    name: Web (lint/typecheck/test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: "9"
+
+      - name: Install dependencies (root)
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm -C apps/web lint
+
+      - name: Typecheck
+        run: pnpm -C apps/web typecheck
+
+      - name: Tests
+        run: pnpm -C apps/web test

@@ -1,0 +1,22 @@
+name = "news-hub-worker"
+main = "src/index.ts"
+compatibility_date = "2026-02-27"
+
+# NOTE: Replace with your real D1 binding once created.
+# For local development you can keep it and create DB later.
+[[d1_databases]]
+binding = "DB"
+database_name = "news_hub_dev"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+CRON_ENABLED = "false"
+FB_POSTING_ENABLED = "false"
+ADMIN_ENABLED = "false"
+CRON_INTERVAL_MIN = "10"
+MAX_NEW_ITEMS_PER_RUN = "25"
+SUMMARY_TARGET_MIN = "400"
+SUMMARY_TARGET_MAX = "700"
+
+[triggers]
+crons = ["*/10 * * * *"]
