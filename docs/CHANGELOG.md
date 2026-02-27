@@ -14,6 +14,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+#### Wrangler v4 upgrade
+- `apps/worker/package.json`: wrangler upgraded from `^3.99.0` to `^4.0.0` (installed 4.69.0)
+- `pnpm-lock.yaml`: regenerated for wrangler v4 dependency tree
+- Verified CI gate (lint/typecheck/test) passes with wrangler v4
+- `wrangler.toml`: `[env.production]` section added with `news_hub_prod` D1 binding (`32403483-6512-4673-aaff-a3a6e3c9aad3`, WEUR)
+- `news_hub_dev` D1 (remote): all 7 tables present and confirmed via wrangler v4 smoke query
+- Local dev (`wrangler dev --local`): Worker starts on `http://127.0.0.1:8787`, D1 binding confirmed, `GET /api/v1/health` returns 200
+
 #### Repo Autonomy Hardening
 - `docs/AUTONOMY_CHECKLIST.md`: what user must provide vs. what agent does autonomously vs. human-required actions; Facebook and Google Cloud setup guides; pre-launch checklist
 - `docs/CONFIG_REFERENCE.md`: complete reference for all environment variables — types, defaults, valid values, secret flags, environment matrix, secret management commands

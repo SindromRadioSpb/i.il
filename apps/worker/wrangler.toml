@@ -18,3 +18,9 @@ SUMMARY_TARGET_MAX = "700"
 
 [triggers]
 crons = ["*/10 * * * *"]
+
+[env.production]
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "news_hub_prod"
+database_id = "32403483-6512-4673-aaff-a3a6e3c9aad3"
