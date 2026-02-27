@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { route } from '../src/router';
 
+// Stateless D1 mock: always returns null for .first() and [] for .all().
+// Sufficient for health/feed/story tests that expect empty/not-found state.
+const EMPTY_DB: D1Database = (() => {
+  const stmt = {
+    bind: () => stmt,
+    first: <T>() => Promise.resolve(null as T | null),
+    all: <T>() => Promise.resolve({ results: [] as T[], success: true, meta: {} }),
+    run: () => Promise.resolve({ success: true, meta: { changes: 0 } }),
+  };
+  return { prepare: () => stmt } as unknown as D1Database;
+})();
+
 const ENV = {
-  DB: {} as unknown as D1Database,
+  DB: EMPTY_DB,
   CRON_ENABLED: 'false',
   FB_POSTING_ENABLED: 'false',
   ADMIN_ENABLED: 'true',
