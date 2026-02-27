@@ -3,6 +3,8 @@ export interface RunCounters {
   sourcesFailed: number;
   itemsFound: number;
   itemsNew: number;
+  storiesNew: number;
+  storiesUpdated: number;
   errorsTotal: number;
 }
 
@@ -38,14 +40,16 @@ export async function finishRun(
   await db
     .prepare(
       `UPDATE runs
-       SET finished_at   = ?,
-           status        = ?,
-           sources_ok    = ?,
+       SET finished_at    = ?,
+           status         = ?,
+           sources_ok     = ?,
            sources_failed = ?,
-           items_found   = ?,
-           items_new     = ?,
-           errors_total  = ?,
-           duration_ms   = ?
+           items_found    = ?,
+           items_new      = ?,
+           stories_new    = ?,
+           stories_updated = ?,
+           errors_total   = ?,
+           duration_ms    = ?
        WHERE run_id = ?`,
     )
     .bind(
@@ -55,6 +59,8 @@ export async function finishRun(
       counters.sourcesFailed,
       counters.itemsFound,
       counters.itemsNew,
+      counters.storiesNew,
+      counters.storiesUpdated,
       counters.errorsTotal,
       durationMs,
       runId,

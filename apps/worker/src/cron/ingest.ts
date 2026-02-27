@@ -5,6 +5,7 @@ import { upsertItems } from '../db/items_repo';
 import { startRun, finishRun, type RunCounters } from '../db/runs_repo';
 import { recordError } from '../db/errors_repo';
 import { acquireLock, releaseLock } from './run_lock';
+import { clusterNewItems } from '../cluster/cluster';
 
 const LOCK_TTL_SEC = 300; // 5 minutes
 
@@ -14,7 +15,7 @@ const LOCK_TTL_SEC = 300; // 5 minutes
  * Flow:
  *  1. Acquire distributed lease lock (prevents overlap if cron fires early).
  *  2. Record a new run in the runs table.
- *  3. For each enabled RSS source: fetch → normalize → upsert items.
+ *  3. For each enabled RSS source: fetch → normalize → upsert items → cluster new items.
  *  4. Finish run with final counters; release lock (in finally).
  *
  * Per-source errors are isolated: one bad feed does not stop the others.
@@ -34,6 +35,8 @@ export async function runIngest(env: Env): Promise<void> {
     sourcesFailed: 0,
     itemsFound: 0,
     itemsNew: 0,
+    storiesNew: 0,
+    storiesUpdated: 0,
     errorsTotal: 0,
   };
 
@@ -46,9 +49,18 @@ export async function runIngest(env: Env): Promise<void> {
       try {
         const maxItems = source.throttle?.max_items_per_run ?? maxItemsPerRun;
         const entries = await fetchRss(source.url, maxItems);
-        const { found, inserted } = await upsertItems(db, entries, source.id);
+        const { found, inserted, newKeys } = await upsertItems(db, entries, source.id);
         counters.itemsFound += found;
         counters.itemsNew += inserted;
+
+        // Cluster only items that were freshly inserted this run.
+        if (newKeys.length > 0) {
+          const newEntries = entries.filter(e => newKeys.includes(e.itemKey));
+          const clusterResult = await clusterNewItems(db, newEntries);
+          counters.storiesNew += clusterResult.storiesNew;
+          counters.storiesUpdated += clusterResult.storiesUpdated;
+        }
+
         counters.sourcesOk++;
       } catch (err) {
         counters.sourcesFailed++;

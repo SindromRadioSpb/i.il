@@ -11,8 +11,8 @@ export async function upsertItems(
   db: D1Database,
   entries: NormalizedEntry[],
   sourceId: string,
-): Promise<{ found: number; inserted: number }> {
-  if (entries.length === 0) return { found: 0, inserted: 0 };
+): Promise<{ found: number; inserted: number; newKeys: string[] }> {
+  if (entries.length === 0) return { found: 0, inserted: 0, newKeys: [] };
 
   const now = new Date().toISOString();
 
@@ -42,6 +42,11 @@ export async function upsertItems(
   );
 
   const results = await db.batch(stmts);
-  const inserted = results.reduce((sum, r) => sum + (r.meta?.changes ?? 0), 0);
-  return { found: entries.length, inserted };
+  const newKeys: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    if ((results[i]?.meta?.changes ?? 0) > 0) {
+      newKeys.push(entries[i]!.itemKey);
+    }
+  }
+  return { found: entries.length, inserted: newKeys.length, newKeys };
 }
