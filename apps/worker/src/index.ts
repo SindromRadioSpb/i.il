@@ -1,5 +1,6 @@
 import type { ExportedHandler } from '@cloudflare/workers-types';
 import { route } from './router';
+import { runIngest } from './cron/ingest';
 
 export interface Env {
   DB: D1Database;
@@ -19,11 +20,10 @@ const handler: ExportedHandler<Env> = {
     return route(request, env, ctx);
   },
 
-  // Cron handler is guarded by CRON_ENABLED (see router/cron module later).
-  async scheduled(_controller, env, _ctx) {
+  // Cron handler — guarded by CRON_ENABLED flag.
+  async scheduled(_controller, env, ctx) {
     if (env.CRON_ENABLED !== 'true') return;
-    // Placeholder: implemented in PATCH-05 and later.
-    // _ctx.waitUntil(runCronIngest(env));
+    ctx.waitUntil(runIngest(env));
   },
 };
 

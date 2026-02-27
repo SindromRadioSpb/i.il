@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ynet - ראשי</title>
+    <link>https://www.ynet.co.il</link>
+    <description>ynet news</description>
+    <!-- Item 1: has UTM tracking params + pubDate + HTML in description -->
+    <item>
+      <title>כותרת ראשונה</title>
+      <link>https://www.ynet.co.il/news/article/1?utm_source=rss&amp;utm_medium=feed&amp;keep=yes</link>
+      <description>תיאור &lt;b&gt;ראשון&lt;/b&gt; עם HTML</description>
+      <pubDate>Thu, 27 Feb 2026 10:00:00 +0000</pubDate>
+      <guid>https://www.ynet.co.il/news/article/1</guid>
+    </item>
+    <!-- Item 2: no pubDate, plain description -->
+    <item>
+      <title>כותרת שנייה</title>
+      <link>https://www.ynet.co.il/news/article/2</link>
+      <description>תיאור שני פשוט</description>
+      <guid>https://www.ynet.co.il/news/article/2</guid>
+    </item>
+  </channel>
+</rss>

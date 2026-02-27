@@ -11,6 +11,7 @@
     "format": "prettier -w \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
+    "fast-xml-parser": "^4.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
