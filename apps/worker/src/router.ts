@@ -13,8 +13,10 @@ function json(data: unknown, status = 200): Response {
 
 export async function route(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const { pathname } = url;
 
-  if (request.method === 'GET' && url.pathname === '/api/v1/health') {
+  // GET /api/v1/health
+  if (request.method === 'GET' && pathname === '/api/v1/health') {
     return json({
       ok: true,
       service: {
@@ -27,10 +29,39 @@ export async function route(request: Request, env: Env, _ctx: ExecutionContext):
     });
   }
 
+  // GET /api/v1/feed
+  if (request.method === 'GET' && pathname === '/api/v1/feed') {
+    return json({
+      ok: true,
+      data: {
+        stories: [],
+        next_cursor: null,
+      },
+    });
+  }
+
+  // GET /api/v1/story/:id
+  const storyMatch = /^\/api\/v1\/story\/([^/]+)$/.exec(pathname);
+  if (request.method === 'GET' && storyMatch !== null) {
+    const storyId = storyMatch[1];
+    return json(
+      {
+        ok: false,
+        error: {
+          code: 'not_found',
+          message: 'Story not found',
+          details: { story_id: storyId },
+        },
+      },
+      404,
+    );
+  }
+
+  // 404 fallback
   return json(
     {
       ok: false,
-      error: { code: 'not_found', message: 'Not found', details: { path: url.pathname } },
+      error: { code: 'not_found', message: 'Not found', details: { path: pathname } },
     },
     404,
   );
