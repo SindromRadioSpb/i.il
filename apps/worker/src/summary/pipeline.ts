@@ -4,13 +4,13 @@
  * For each draft story:
  *  1. Fetch its items.
  *  2. Compute a content hash; skip if already generated for this exact content.
- *  3. Call Claude for a Russian summary.
+ *  3. Run ProviderChain (Gemini → Claude → rule_based).
  *  4. Apply glossary, parse sections, run guards.
  *  5. Persist (story → published, publications row created).
  */
 
 import type { Env } from '../index';
-import { callClaude } from './generate';
+import { buildChain } from './provider_chain';
 import { applyGlossary } from './glossary';
 import { parseSections, formatBody, formatFull } from './format';
 import { guardLength, guardForbiddenWords, guardNumbers, guardHighRisk } from './guards';
@@ -33,12 +33,13 @@ export interface SummaryCounters {
 
 export async function runSummaryPipeline(env: Env, runId: string): Promise<SummaryCounters> {
   const db = env.DB;
-  const apiKey = env.ANTHROPIC_API_KEY ?? '';
-  const model = env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
   const targetMin = parseInt(env.SUMMARY_TARGET_MIN ?? '400', 10) || 400;
   const targetMax = parseInt(env.SUMMARY_TARGET_MAX ?? '700', 10) || 700;
 
   const counters: SummaryCounters = { attempted: 0, published: 0, skipped: 0, failed: 0 };
+
+  const chain = buildChain(env);
+  if (chain.length === 0) return counters; // no providers configured
 
   const stories = await getStoriesNeedingSummary(db, MAX_SUMMARIES_PER_RUN);
 
@@ -60,8 +61,8 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
         continue;
       }
 
-      // Generate
-      const raw = await callClaude(apiKey, model, items, story.riskLevel);
+      // Generate via chain
+      const { text: raw, providerName } = await chain.generate(items, story.riskLevel, env);
       const glossarized = applyGlossary(raw);
       const parsed = parseSections(glossarized);
       if (!parsed) {
@@ -71,7 +72,7 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
           'summary',
           null,
           story.storyId,
-          new Error('format_parse_failed'),
+          new Error(`format_parse_failed [${providerName}]`),
         );
         counters.failed++;
         continue;
@@ -80,12 +81,12 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
       const body = formatBody(parsed);
       const fullText = formatFull(parsed);
 
-      // Guards
-      const sourceTitles = items.map(i => i.titleHe);
+      // Guards (rule_based provider may produce short bodies — allow it through)
+      const isRuleBased = providerName === 'rule_based';
       const guardResults = [
-        guardLength(body, targetMin, targetMax),
+        isRuleBased ? { ok: true } : guardLength(body, targetMin, targetMax),
         guardForbiddenWords(fullText),
-        guardNumbers(sourceTitles, fullText),
+        guardNumbers(items.map(i => i.titleHe), fullText),
         guardHighRisk(body, story.riskLevel),
       ];
       const firstFailed = guardResults.find(g => !g.ok);
@@ -96,13 +97,12 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
           'summary',
           null,
           story.storyId,
-          new Error(firstFailed.reason ?? 'guard_failed'),
+          new Error(`${firstFailed.reason ?? 'guard_failed'} [${providerName}]`),
         );
         counters.failed++;
         continue;
       }
 
-      // Persist: update story + create/update publications row
       await updateStorySummary(
         db,
         story.storyId,

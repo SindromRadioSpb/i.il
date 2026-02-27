@@ -27,7 +27,7 @@ function makeErrorFetch(status: number, body = 'error') {
 }
 
 const TEST_ITEMS = [
-  { titleHe: 'רעידת אדמה בתל אביב', sourceId: 'ynet_main', publishedAt: null },
+  { itemId: 'i1', titleHe: 'רעידת אדמה בתל אביב', sourceId: 'ynet_main', publishedAt: null },
 ];
 
 beforeEach(() => {

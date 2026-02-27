@@ -19,6 +19,8 @@ MAX_NEW_ITEMS_PER_RUN = "25"
 SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+GEMINI_MODEL = "gemini-2.0-flash"
+SUMMARY_PROVIDERS = "gemini,claude,rule_based"
 
 # Cron trigger (registered for both dev and production)
 [triggers]
@@ -42,6 +44,8 @@ MAX_NEW_ITEMS_PER_RUN = "25"
 SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+GEMINI_MODEL = "gemini-2.0-flash"
+SUMMARY_PROVIDERS = "gemini,claude,rule_based"
 
 [env.production.triggers]
 crons = ["*/10 * * * *"]

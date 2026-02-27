@@ -11,10 +11,14 @@ export interface Env {
   MAX_NEW_ITEMS_PER_RUN: string;
   SUMMARY_TARGET_MIN: string;
   SUMMARY_TARGET_MAX: string;
-  // Optional — set via `wrangler secret put ANTHROPIC_API_KEY`
+  // Secrets — set via `wrangler secret put <KEY>`
   ANTHROPIC_API_KEY?: string;
-  // Default: claude-haiku-4-5-20251001
+  GEMINI_API_KEY?: string;
+  // Model overrides (defaults set in wrangler.toml vars)
   ANTHROPIC_MODEL?: string;
+  GEMINI_MODEL?: string;
+  // Comma-separated provider order (default: gemini,claude,rule_based)
+  SUMMARY_PROVIDERS?: string;
 }
 
 const handler: ExportedHandler<Env> = {
