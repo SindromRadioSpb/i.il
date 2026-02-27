@@ -14,6 +14,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+#### Web frontend (apps/web)
+- `apps/web/src/pages/index.astro`: added try/catch around Worker health fetch so `astro build` succeeds even when Worker is unreachable at build time (static SSG — fetch runs during build)
+- `astro build` verified: produces `apps/web/dist/` cleanly
+
 #### Cloudflare deployment config
 - `apps/worker/wrangler.toml`: renamed worker `"news-hub-worker"` → `"iil"` (matches Cloudflare project name)
 - `wrangler.toml`: added `[env.production.vars]` with explicit production values (CRON_ENABLED/FB_POSTING_ENABLED=false until manually enabled)

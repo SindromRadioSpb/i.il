@@ -1,7 +1,13 @@
 ---
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
-const res = await fetch(`${apiBase}/api/v1/health`);
-const health = await res.json();
+
+let health: unknown = null;
+try {
+  const res = await fetch(`${apiBase}/api/v1/health`);
+  if (res.ok) health = await res.json();
+} catch {
+  // Worker unreachable during build — page renders without live data
+}
 ---
 
 <html lang="ru">
@@ -13,7 +19,10 @@ const health = await res.json();
   </head>
   <body>
     <h1>News Hub (HE→RU)</h1>
-    <p>Worker health: <code>{JSON.stringify(health)}</code></p>
-    <p>Дальше здесь будет feed Stories (PATCH-09).</p>
+    {health
+      ? <p>Worker: <code>{JSON.stringify(health)}</code></p>
+      : <p>Worker недоступен во время билда — данные появятся после деплоя.</p>
+    }
+    <p>Дальше здесь будет feed Stories.</p>
   </body>
 </html>
