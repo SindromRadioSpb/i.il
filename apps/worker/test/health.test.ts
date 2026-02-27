@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { route } from '../src/router';
 
 const ENV = {
-  // @ts-expect-error D1Database not needed for these tests
-  DB: undefined,
+  DB: {} as unknown as D1Database,
   CRON_ENABLED: 'false',
   FB_POSTING_ENABLED: 'false',
   ADMIN_ENABLED: 'true',
@@ -27,7 +26,7 @@ describe('GET /api/v1/health', () => {
     const res = await get('/api/v1/health');
     expect(res.status).toBe(200);
 
-    const body = await res.json() as Record<string, unknown>;
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.ok).toBe(true);
 
     // service block
@@ -45,7 +44,7 @@ describe('GET /api/v1/health', () => {
 
   it('env=dev when ADMIN_ENABLED=true', async () => {
     const res = await get('/api/v1/health');
-    const body = await res.json() as { service: { env: string } };
+    const body = (await res.json()) as { service: { env: string } };
     expect(body.service.env).toBe('dev');
   });
 });
@@ -58,7 +57,10 @@ describe('GET /api/v1/feed', () => {
     const res = await get('/api/v1/feed');
     expect(res.status).toBe(200);
 
-    const body = await res.json() as { ok: boolean; data: { stories: unknown[]; next_cursor: unknown } };
+    const body = (await res.json()) as {
+      ok: boolean;
+      data: { stories: unknown[]; next_cursor: unknown };
+    };
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.data.stories)).toBe(true);
     expect(body.data.stories).toHaveLength(0);
@@ -74,7 +76,10 @@ describe('GET /api/v1/story/:id', () => {
     const res = await get('/api/v1/story/abc-123');
     expect(res.status).toBe(404);
 
-    const body = await res.json() as { ok: boolean; error: { code: string; details: { story_id: string } } };
+    const body = (await res.json()) as {
+      ok: boolean;
+      error: { code: string; details: { story_id: string } };
+    };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe('not_found');
     expect(body.error.details.story_id).toBe('abc-123');
@@ -82,7 +87,7 @@ describe('GET /api/v1/story/:id', () => {
 
   it('story_id is passed through correctly', async () => {
     const res = await get('/api/v1/story/xyz-456');
-    const body = await res.json() as { error: { details: { story_id: string } } };
+    const body = (await res.json()) as { error: { details: { story_id: string } } };
     expect(body.error.details.story_id).toBe('xyz-456');
   });
 });
@@ -95,7 +100,7 @@ describe('404 fallback', () => {
     const res = await get('/api/v1/unknown');
     expect(res.status).toBe(404);
 
-    const body = await res.json() as { ok: boolean; error: { code: string } };
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe('not_found');
   });

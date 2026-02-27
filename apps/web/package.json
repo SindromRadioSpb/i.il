@@ -7,10 +7,10 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "lint": "eslint \"src/**/*.ts\" \"src/**/*.astro\" \"test/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"src/**/*.astro\" \"test/**/*.ts\" --no-error-on-unmatched-pattern",
     "typecheck": "astro check",
     "test": "vitest run",
-    "format": "prettier -w \"src/**/*.{ts,astro}\" \"test/**/*.ts\""
+    "format": "prettier -w --ignore-unknown \"src/**/*.{ts,astro}\" \"test/**/*.ts\""
   },
   "dependencies": {
     "astro": "^5.0.0"

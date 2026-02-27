@@ -1,4 +1,4 @@
-import type { ExportedHandler, ExecutionContext } from '@cloudflare/workers-types';
+import type { ExportedHandler } from '@cloudflare/workers-types';
 import { route } from './router';
 
 export interface Env {
@@ -13,15 +13,17 @@ export interface Env {
 }
 
 const handler: ExportedHandler<Env> = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // Let TypeScript infer param types from ExportedHandler<Env> to stay compatible
+  // with whatever Request/ExecutionContext variant workers-types exports.
+  async fetch(request, env, ctx) {
     return route(request, env, ctx);
   },
 
   // Cron handler is guarded by CRON_ENABLED (see router/cron module later).
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(_controller, env, _ctx) {
     if (env.CRON_ENABLED !== 'true') return;
     // Placeholder: implemented in PATCH-05 and later.
-    // ctx.waitUntil(runCronIngest(env));
+    // _ctx.waitUntil(runCronIngest(env));
   },
 };
 
