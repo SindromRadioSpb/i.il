@@ -14,6 +14,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+#### Cloudflare deployment config
+- `apps/worker/wrangler.toml`: renamed worker `"news-hub-worker"` → `"iil"` (matches Cloudflare project name)
+- `wrangler.toml`: added `[env.production.vars]` with explicit production values (CRON_ENABLED/FB_POSTING_ENABLED=false until manually enabled)
+- `wrangler.toml`: added `[env.production.triggers]` so cron is registered in production environment (named envs don't inherit top-level triggers)
+
 #### Wrangler v4 upgrade
 - `apps/worker/package.json`: wrangler upgraded from `^3.99.0` to `^4.0.0` (installed 4.69.0)
 - `pnpm-lock.yaml`: regenerated for wrangler v4 dependency tree
