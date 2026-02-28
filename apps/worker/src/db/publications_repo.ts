@@ -7,8 +7,17 @@ export interface FbStoryRow {
 }
 
 /**
- * Fetch published stories that have not yet been posted to Facebook.
- * Ordered newest first so the most recent stories are posted first.
+ * Fetch published stories eligible for Facebook posting.
+ *
+ * Eligibility rules:
+ *  - web_status = 'published' (story visible on site)
+ *  - fb_status IN ('disabled', 'failed')  — 'disabled' = never attempted,
+ *    'failed' = transient error → auto-retry; auth_error / rate_limited are
+ *    NOT retried automatically (need manual reset after fixing credentials)
+ *  - fb_attempts < 5  — permanent skip after 5 consecutive failures
+ *  - fb_post_id IS NULL  — idempotency guard: if the FB API call succeeded but
+ *    the DB write crashed, the post_id would already be set; skip to avoid
+ *    double-posting
  */
 export async function getStoriesForFbPosting(
   db: D1Database,
@@ -20,7 +29,9 @@ export async function getStoriesForFbPosting(
        FROM publications p
        JOIN stories s USING(story_id)
        WHERE p.web_status = 'published'
-         AND p.fb_status = 'disabled'
+         AND p.fb_status IN ('disabled', 'failed')
+         AND p.fb_attempts < 5
+         AND p.fb_post_id IS NULL
          AND s.title_ru IS NOT NULL
          AND s.summary_ru IS NOT NULL
        ORDER BY s.last_update_at DESC
