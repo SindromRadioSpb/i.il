@@ -7,6 +7,7 @@ import { recordError } from '../db/errors_repo';
 import { acquireLock, releaseLock } from './run_lock';
 import { clusterNewItems } from '../cluster/cluster';
 import { runSummaryPipeline } from '../summary/pipeline';
+import { runFbCrosspost } from '../fb/post';
 
 const LOCK_TTL_SEC = 300; // 5 minutes
 
@@ -81,6 +82,18 @@ export async function runIngest(env: Env): Promise<void> {
     } catch (err) {
       counters.errorsTotal++;
       await recordError(db, runId, 'summary', null, null, err);
+    }
+
+    // Post published stories to Facebook
+    if (env.FB_POSTING_ENABLED === 'true') {
+      try {
+        const fbResult = await runFbCrosspost(env, runId);
+        counters.publishedFb += fbResult.posted;
+        counters.errorsTotal += fbResult.failed;
+      } catch (err) {
+        counters.errorsTotal++;
+        await recordError(db, runId, 'fb_crosspost', null, null, err);
+      }
     }
   } finally {
     await finishRun(db, runId, startedAtMs, counters);

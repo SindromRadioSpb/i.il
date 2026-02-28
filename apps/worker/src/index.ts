@@ -14,11 +14,15 @@ export interface Env {
   // Secrets — set via `wrangler secret put <KEY>`
   ANTHROPIC_API_KEY?: string;
   GEMINI_API_KEY?: string;
+  FB_PAGE_ACCESS_TOKEN?: string;
   // Model overrides (defaults set in wrangler.toml vars)
   ANTHROPIC_MODEL?: string;
   GEMINI_MODEL?: string;
   // Comma-separated provider order (default: gemini,claude,rule_based)
   SUMMARY_PROVIDERS?: string;
+  // Facebook crossposting
+  FB_PAGE_ID?: string;
+  PUBLIC_SITE_BASE_URL?: string;
 }
 
 const handler: ExportedHandler<Env> = {
