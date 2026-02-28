@@ -171,7 +171,7 @@ async def extract_facts(
     """
     user = _build_fact_user(items, story_url, risk_level)
     try:
-        raw = await ollama.chat(_FACT_SYSTEM, user, client=client)
+        raw = await ollama.chat(_FACT_SYSTEM, user, client=client, format="json")
         data = extract_json_from_text(raw)
         return _coerce_facts(data, story_url, risk_level)
     except Exception:

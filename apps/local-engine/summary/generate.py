@@ -13,6 +13,7 @@ Key differences from the TS Worker pipeline:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass, field
 
@@ -25,7 +26,8 @@ from db.repos.stories_repo import (
     get_story_items_for_summary,
     update_story_summary,
 )
-from summary.categories import classify_category, generate_hashtags
+from observe.logger import get_logger
+from summary.categories import classify_and_tag
 from summary.fact_extract import extract_facts
 from summary.format import format_body, format_full, parse_sections
 from summary.glossary import apply_glossary
@@ -114,11 +116,13 @@ async def run_summary_pipeline(
     Returns:
         SummaryCounters with attempted/published/skipped/failed + WOW stats.
     """
+    log = get_logger("summary")
     counters = SummaryCounters()
     stories = await get_stories_needing_summary(db, limit=max_summaries)
 
-    for story in stories:
+    for idx, story in enumerate(stories):
         counters.attempted += 1
+        log.info("story_processing", idx=idx + 1, total=len(stories), story_id=story.story_id[:12])
         try:
             items = await get_story_items_for_summary(db, story.story_id)
             if not items:
@@ -184,20 +188,16 @@ async def run_summary_pipeline(
                 continue
 
             # ── Best-effort enrichment (failures don't block publish) ────────
-
-            # Auto-category + hashtags (used by CF sync / web)
-            category = await classify_category(
-                ollama, parsed.title, full_text, client=http_client
+            # Run category+hashtags concurrently with the WOW pipeline.
+            # classify_and_tag uses one combined Ollama call (was 2 sequential),
+            # and runs in parallel with the 2-4 WOW Ollama calls.
+            (cat_result, wow_result) = await asyncio.gather(
+                classify_and_tag(ollama, parsed.title, full_text, client=http_client),
+                _generate_fb_caption(ollama, items, story.risk_level, client=http_client),
             )
-            hashtag_list = await generate_hashtags(
-                ollama, parsed.title, category, client=http_client
-            )
+            category, hashtag_list = cat_result
             hashtags_str = " ".join(hashtag_list) if hashtag_list else None
-
-            # WOW-story FB caption (Passes 1–3)
-            fb_caption, wc = await _generate_fb_caption(
-                ollama, items, story.risk_level, client=http_client
-            )
+            fb_caption, wc = wow_result
             counters.wow_caption_ok += wc.caption_ok
             counters.wow_caption_fail += wc.caption_fail
             counters.wow_rewrite_attempts += wc.rewrite_attempts

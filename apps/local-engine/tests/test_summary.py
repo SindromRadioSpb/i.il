@@ -43,8 +43,8 @@ _VALID_SUMMARY = (
     "Источники: Ynet, Mako"
 )
 
-_VALID_CATEGORY = "society"
-_VALID_HASHTAGS = "#Израиль #землетрясение #ТельАвив"
+# Combined category+hashtags JSON (single Ollama call since classify_and_tag merge)
+_VALID_CAT_TAG_JSON = '{"category": "society", "hashtags": ["#Израиль", "#землетрясение", "#ТельАвив"]}'
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_memoization_hash_is_64_hex_chars():
 
 async def test_pipeline_publishes_valid_summary(db, run_id):
     await _setup_story(db)
-    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CAT_TAG_JSON])
 
     counters = await run_summary_pipeline(db, ollama, run_id)
 
@@ -130,7 +130,7 @@ async def test_pipeline_publishes_valid_summary(db, run_id):
 
 async def test_pipeline_creates_publication_row(db, run_id):
     await _setup_story(db)
-    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CAT_TAG_JSON])
 
     await run_summary_pipeline(db, ollama, run_id)
 
@@ -142,7 +142,7 @@ async def test_pipeline_creates_publication_row(db, run_id):
 
 async def test_pipeline_stores_category_and_hashtags(db, run_id):
     await _setup_story(db)
-    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CAT_TAG_JSON])
 
     await run_summary_pipeline(db, ollama, run_id)
 
@@ -174,7 +174,7 @@ async def test_pipeline_skips_story_with_no_items(db, run_id):
 
 async def test_pipeline_skips_already_published_story(db, run_id):
     await _setup_story(db)
-    ollama1 = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+    ollama1 = _make_ollama([_VALID_SUMMARY, _VALID_CAT_TAG_JSON])
     await run_summary_pipeline(db, ollama1, run_id)
 
     # Story is now published; won't appear in draft query
@@ -244,14 +244,13 @@ async def test_pipeline_respects_max_summaries_limit(db, run_id):
 
     call_count = 0
 
-    async def _chat(system, user, client=None):
+    async def _chat(system, user, client=None, *, format=None):
         nonlocal call_count
         call_count += 1
-        if call_count % 3 == 1:
+        # Odd calls = summary; even calls = combined cat+tag JSON (best-effort)
+        if call_count % 2 == 1:
             return _VALID_SUMMARY
-        if call_count % 3 == 2:
-            return _VALID_CATEGORY
-        return _VALID_HASHTAGS
+        return _VALID_CAT_TAG_JSON
 
     ollama = MagicMock(spec=OllamaClient)
     ollama.chat = AsyncMock(side_effect=_chat)
@@ -293,11 +292,12 @@ _VALID_WOW = (
 async def test_pipeline_generates_fb_caption(db, run_id):
     """Pipeline stores fb_caption in DB when WOW generation succeeds."""
     await _setup_story(db)
-    # 5 calls: summary + category + hashtags + fact_extract + draft_wow
+    # 4 calls: summary + combined_cat_tag + fact_extract + draft_wow
+    # (classify_and_tag and _generate_fb_caption run concurrently via asyncio.gather;
+    #  Task A = classify_and_tag runs first and consumes the cat_tag JSON response)
     ollama = _make_ollama([
         _VALID_SUMMARY,
-        _VALID_CATEGORY,
-        _VALID_HASHTAGS,
+        _VALID_CAT_TAG_JSON,
         _VALID_FACTS_JSON,
         _VALID_WOW,
     ])
@@ -322,8 +322,10 @@ async def test_pipeline_generates_fb_caption(db, run_id):
 async def test_pipeline_publishes_without_fb_caption_on_wow_failure(db, run_id):
     """Story is published even when WOW story generation fails (best-effort)."""
     await _setup_story(db)
-    # Only 3 responses — WOW generation will run out of mocked responses and fail silently
-    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+    # Only 2 responses — WOW generation will run out of mocked responses and fail silently
+    # (asyncio.gather runs classify_and_tag first consuming _VALID_CAT_TAG_JSON,
+    #  then _generate_fb_caption gets no more responses → WOW fails silently)
+    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CAT_TAG_JSON])
 
     counters = await run_summary_pipeline(db, ollama, run_id)
 

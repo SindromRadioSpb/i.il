@@ -27,6 +27,8 @@ class OllamaClient:
         system: str,
         user: str,
         client: httpx.AsyncClient | None = None,
+        *,
+        format: str | None = None,
     ) -> str:
         """Call Ollama /api/chat and return the assistant message content.
 
@@ -35,6 +37,8 @@ class OllamaClient:
             user: User message.
             client: Optional pre-constructed httpx.AsyncClient (for tests).
                     If None, a new client is created for this request.
+            format: Optional Ollama response format.  Pass ``"json"`` to
+                    constrain the model to always return valid JSON output.
 
         Returns:
             The assistant's response text.
@@ -43,7 +47,7 @@ class OllamaClient:
             httpx.HTTPStatusError: on non-2xx responses.
             KeyError: if the response JSON is malformed.
         """
-        payload = {
+        payload: dict = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -51,6 +55,8 @@ class OllamaClient:
             ],
             "stream": False,
         }
+        if format:
+            payload["format"] = format
         url = f"{self.base_url}/api/chat"
 
         if client is not None:
