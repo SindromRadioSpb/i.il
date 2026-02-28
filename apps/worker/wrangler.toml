@@ -39,7 +39,7 @@ database_id = "32403483-6512-4673-aaff-a3a6e3c9aad3"
 # ANTHROPIC_API_KEY is a secret — set via: wrangler secret put ANTHROPIC_API_KEY --env production
 [env.production.vars]
 CRON_ENABLED = "true"
-FB_POSTING_ENABLED = "false"
+FB_POSTING_ENABLED = "true"
 ADMIN_ENABLED = "false"
 CRON_INTERVAL_MIN = "10"
 MAX_NEW_ITEMS_PER_RUN = "25"
