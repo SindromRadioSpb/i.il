@@ -1,6 +1,7 @@
 import type { ExecutionContext } from '@cloudflare/workers-types';
 import type { Env } from './index';
-import { getLastRun } from './api/health';
+import { getLastRun, getTopFailingSources } from './api/health';
+import { getRecentRuns, getRunErrors } from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
 
@@ -30,7 +31,10 @@ export async function route(
 
     // GET /api/v1/health
     if (request.method === 'GET' && pathname === '/api/v1/health') {
-      const lastRun = await getLastRun(env.DB);
+      const [lastRun, topFailingSources] = await Promise.all([
+        getLastRun(env.DB),
+        getTopFailingSources(env.DB),
+      ]);
       return json({
         ok: true,
         service: {
@@ -40,7 +44,29 @@ export async function route(
           now_utc: new Date().toISOString(),
         },
         last_run: lastRun,
+        top_failing_sources: topFailingSources,
       });
+    }
+
+    // Admin routes — gated by ADMIN_ENABLED
+    if (pathname.startsWith('/api/v1/admin/')) {
+      if (env.ADMIN_ENABLED !== 'true') {
+        return err(403, 'forbidden', 'Admin endpoints are disabled');
+      }
+
+      // GET /api/v1/admin/runs
+      if (request.method === 'GET' && pathname === '/api/v1/admin/runs') {
+        const runs = await getRecentRuns(env.DB);
+        return json({ ok: true, data: { runs } });
+      }
+
+      // GET /api/v1/admin/errors?run_id=X
+      if (request.method === 'GET' && pathname === '/api/v1/admin/errors') {
+        const runId = url.searchParams.get('run_id');
+        if (!runId) return err(400, 'invalid_request', 'run_id query param required');
+        const errors = await getRunErrors(env.DB, runId);
+        return json({ ok: true, data: { errors } });
+      }
     }
 
     // GET /api/v1/feed

@@ -1,4 +1,4 @@
-interface RunRow {
+export interface RunRow {
   run_id: string;
   started_at: string;
   finished_at: string | null;
@@ -13,6 +13,38 @@ interface RunRow {
   published_fb: number;
   errors_total: number;
   duration_ms: number;
+}
+
+interface FailingSourceRow {
+  source_id: string;
+  error_count: number;
+}
+
+/**
+ * Fetch top failing sources from the last N hours.
+ * Returns an empty array on any DB error.
+ */
+export async function getTopFailingSources(
+  db: D1Database,
+  hours = 24,
+): Promise<FailingSourceRow[]> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT source_id, COUNT(*) as error_count
+         FROM error_events
+         WHERE created_at > datetime('now', '-' || ? || ' hours')
+           AND source_id IS NOT NULL
+         GROUP BY source_id
+         ORDER BY error_count DESC
+         LIMIT 5`,
+      )
+      .bind(hours)
+      .all<FailingSourceRow>();
+    return result.results ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /**

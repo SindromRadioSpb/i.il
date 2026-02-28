@@ -1,0 +1,245 @@
+---
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
+
+interface RunRow {
+  run_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  sources_ok: number;
+  sources_failed: number;
+  items_found: number;
+  items_new: number;
+  stories_new: number;
+  stories_updated: number;
+  published_web: number;
+  published_fb: number;
+  errors_total: number;
+  duration_ms: number;
+}
+
+interface HealthResponse {
+  ok: boolean;
+  service: { name: string; version: string; env: string; now_utc: string };
+  last_run: RunRow | null;
+  top_failing_sources: { source_id: string; error_count: number }[];
+}
+
+interface RunsResponse {
+  ok: boolean;
+  data: { runs: RunRow[] };
+}
+
+let health: HealthResponse | null = null;
+let runs: RunRow[] = [];
+
+try {
+  const [hRes, rRes] = await Promise.all([
+    fetch(`${apiBase}/api/v1/health`),
+    fetch(`${apiBase}/api/v1/admin/runs`),
+  ]);
+  if (hRes.ok) health = await hRes.json() as HealthResponse;
+  if (rRes.ok) {
+    const r = await rRes.json() as RunsResponse;
+    if (r.ok) runs = r.data.runs;
+  }
+} catch {
+  // API unreachable — show empty state
+}
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleString('ru-RU', {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+---
+
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ops — News Hub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 13px;
+           background: #0d1117; color: #c9d1d9; margin: 0; padding: 1.5rem; }
+    h1 { font-size: 1.1rem; color: #58a6ff; margin: 0 0 1.5rem; }
+    h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;
+         color: #8b949e; margin: 1.5rem 0 0.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 0.6rem 0.8rem; }
+    .card-label { font-size: 0.72rem; color: #8b949e; }
+    .card-value { font-size: 1rem; color: #e6edf3; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 0.72rem; color: #8b949e; padding: 0.3rem 0.5rem;
+         border-bottom: 1px solid #30363d; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+    tr:hover td { background: #161b22; cursor: pointer; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
+    .badge-success  { background: #1a4429; color: #3fb950; }
+    .badge-partial  { background: #3d2c00; color: #e3b341; }
+    .badge-failure  { background: #3d1414; color: #f85149; }
+    .num { text-align: right; color: #8b949e; }
+    .num-hi { color: #e6edf3; }
+    .errors-row { display: none; }
+    .errors-row td { padding: 0.5rem 1rem; background: #0d1117; }
+    .errors-row.open { display: table-row; }
+    .error-item { padding: 0.25rem 0; border-bottom: 1px solid #21262d; font-size: 0.75rem; }
+    .error-item:last-child { border-bottom: none; }
+    .error-phase { color: #58a6ff; }
+    .error-src { color: #8b949e; }
+    .notice { color: #8b949e; font-style: italic; padding: 1rem 0; }
+    .fail-src { display: inline-flex; gap: 0.5rem; align-items: center;
+                background: #3d1414; border-radius: 4px; padding: 2px 8px; margin: 2px; font-size: 0.75rem; }
+    .fail-src-count { color: #f85149; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<h1>⚙ News Hub — Ops</h1>
+
+{health ? (
+  <div>
+    <div class="grid">
+      <div class="card">
+        <div class="card-label">Service</div>
+        <div class="card-value">{health.service.name} v{health.service.version}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Environment</div>
+        <div class="card-value">{health.service.env}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Server time</div>
+        <div class="card-value" style="font-size:0.85rem">{fmtTime(health.service.now_utc)}</div>
+      </div>
+      {health.last_run && (
+        <div class="card">
+          <div class="card-label">Last run status</div>
+          <div class="card-value">
+            <span class={`badge badge-${health.last_run.status === 'success' ? 'success' : health.last_run.status === 'partial_failure' ? 'partial' : 'failure'}`}>
+              {health.last_run.status}
+            </span>
+            &nbsp;{fmtDuration(health.last_run.duration_ms)}
+          </div>
+        </div>
+      )}
+    </div>
+
+    {health.top_failing_sources.length > 0 && (
+      <div>
+        <h2>Top failing sources (24h)</h2>
+        <div>
+          {health.top_failing_sources.map(s => (
+            <span class="fail-src">
+              {s.source_id} <span class="fail-src-count">{s.error_count}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+) : (
+  <p class="notice">Health API unreachable.</p>
+)}
+
+<h2>Recent runs</h2>
+
+{runs.length === 0 ? (
+  <p class="notice">No runs recorded yet.</p>
+) : (
+  <table id="runs-table">
+    <thead>
+      <tr>
+        <th>Started</th>
+        <th>Status</th>
+        <th class="num">Dur</th>
+        <th class="num">Src✓</th>
+        <th class="num">Src✗</th>
+        <th class="num">Items</th>
+        <th class="num">New</th>
+        <th class="num">Stories</th>
+        <th class="num">Web</th>
+        <th class="num">FB</th>
+        <th class="num">Errors</th>
+      </tr>
+    </thead>
+    <tbody>
+      {runs.map((r) => (
+        <>
+          <tr data-run-id={r.run_id} class="run-row">
+            <td>{fmtTime(r.started_at)}</td>
+            <td>
+              <span class={`badge badge-${r.status === 'success' ? 'success' : r.status === 'partial_failure' ? 'partial' : 'failure'}`}>
+                {r.status === 'partial_failure' ? 'partial' : r.status}
+              </span>
+            </td>
+            <td class="num">{fmtDuration(r.duration_ms)}</td>
+            <td class="num num-hi">{r.sources_ok}</td>
+            <td class={`num ${r.sources_failed > 0 ? 'num-hi' : ''}`} style={r.sources_failed > 0 ? 'color:#f85149' : ''}>{r.sources_failed}</td>
+            <td class="num">{r.items_found}</td>
+            <td class="num num-hi">{r.items_new}</td>
+            <td class="num">{r.stories_new}+{r.stories_updated}</td>
+            <td class="num num-hi">{r.published_web}</td>
+            <td class="num num-hi">{r.published_fb}</td>
+            <td class={`num ${r.errors_total > 0 ? '' : ''}`} style={r.errors_total > 0 ? 'color:#f85149' : ''}>{r.errors_total}</td>
+          </tr>
+          <tr class="errors-row" id={`errors-${r.run_id}`}>
+            <td colspan="11"><div class="errors-loading">Loading…</div></td>
+          </tr>
+        </>
+      ))}
+    </tbody>
+  </table>
+)}
+
+<script define:vars={{ apiBase }}>
+  const rows = document.querySelectorAll('.run-row');
+  rows.forEach(row => {
+    row.addEventListener('click', async () => {
+      const runId = row.dataset.runId;
+      const errRow = document.getElementById(`errors-${runId}`);
+      if (!errRow) return;
+
+      if (errRow.classList.contains('open')) {
+        errRow.classList.remove('open');
+        return;
+      }
+
+      const container = errRow.querySelector('div');
+      if (container && container.textContent === 'Loading…') {
+        try {
+          const res = await fetch(`${apiBase}/api/v1/admin/errors?run_id=${encodeURIComponent(runId)}`);
+          const json = await res.json();
+          if (json.ok && json.data.errors.length === 0) {
+            container.innerHTML = '<span style="color:#3fb950">No errors for this run.</span>';
+          } else if (json.ok) {
+            container.innerHTML = json.data.errors.map(e =>
+              `<div class="error-item">
+                <span class="error-phase">[${e.phase}]</span>
+                ${e.source_id ? `<span class="error-src"> ${e.source_id}</span>` : ''}
+                ${e.story_id ? `<span class="error-src"> story:${e.story_id.slice(0,8)}</span>` : ''}
+                — ${e.message ?? '(no message)'}
+              </div>`
+            ).join('');
+          } else {
+            container.innerHTML = '<span style="color:#f85149">Failed to load errors.</span>';
+          }
+        } catch {
+          container.innerHTML = '<span style="color:#f85149">API error.</span>';
+        }
+      }
+      errRow.classList.add('open');
+    });
+  });
+</script>
+
+</body>
+</html>
