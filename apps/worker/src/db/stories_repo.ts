@@ -72,7 +72,8 @@ export interface StoryItemForSummary {
   publishedAt: string | null;
 }
 
-/** Fetch draft stories that need a Russian summary generated. */
+/** Fetch draft stories that need a Russian summary generated.
+ *  Excludes stories with editorial_hold = 1 — those wait for manual release. */
 export async function getStoriesNeedingSummary(
   db: D1Database,
   limit: number,
@@ -84,6 +85,7 @@ export async function getStoriesNeedingSummary(
               summary_hash AS summaryHash
        FROM stories
        WHERE state = 'draft'
+         AND editorial_hold = 0
        ORDER BY last_update_at DESC
        LIMIT ?`,
     )

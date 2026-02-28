@@ -32,18 +32,38 @@ interface RunsResponse {
   data: { runs: RunRow[] };
 }
 
+interface DraftStoryRow {
+  story_id: string;
+  start_at: string;
+  last_update_at: string;
+  editorial_hold: number;
+  item_count: number;
+  title_sample: string | null;
+}
+
+interface DraftsResponse {
+  ok: boolean;
+  data: { drafts: DraftStoryRow[] };
+}
+
 let health: HealthResponse | null = null;
 let runs: RunRow[] = [];
+let drafts: DraftStoryRow[] = [];
 
 try {
-  const [hRes, rRes] = await Promise.all([
+  const [hRes, rRes, dRes] = await Promise.all([
     fetch(`${apiBase}/api/v1/health`),
     fetch(`${apiBase}/api/v1/admin/runs`, { headers: adminHeaders }),
+    fetch(`${apiBase}/api/v1/admin/drafts`, { headers: adminHeaders }),
   ]);
   if (hRes.ok) health = await hRes.json() as HealthResponse;
   if (rRes.ok) {
     const r = await rRes.json() as RunsResponse;
     if (r.ok) runs = r.data.runs;
+  }
+  if (dRes.ok) {
+    const d = await dRes.json() as DraftsResponse;
+    if (d.ok) drafts = d.data.drafts;
   }
 } catch {
   // API unreachable — show empty state
@@ -101,6 +121,13 @@ function fmtTime(iso: string): string {
     .fail-src { display: inline-flex; gap: 0.5rem; align-items: center;
                 background: #3d1414; border-radius: 4px; padding: 2px 8px; margin: 2px; font-size: 0.75rem; }
     .fail-src-count { color: #f85149; font-weight: 700; }
+    .btn { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem;
+           font-weight: 600; cursor: pointer; border: none; font-family: inherit; }
+    .btn-hold { background: #3d2c00; color: #e3b341; }
+    .btn-release { background: #1a4429; color: #3fb950; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .draft-title { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6edf3; }
+    .held-badge { background: #3d2c00; color: #e3b341; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; }
   </style>
 </head>
 <body>
@@ -202,6 +229,41 @@ function fmtTime(iso: string): string {
   </table>
 )}
 
+<h2>Draft stories</h2>
+
+{drafts.length === 0 ? (
+  <p class="notice">No draft stories pending review.</p>
+) : (
+  <table id="drafts-table">
+    <thead>
+      <tr>
+        <th>Updated</th>
+        <th>Title (he)</th>
+        <th class="num">Items</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {drafts.map((d) => (
+        <tr>
+          <td style="white-space:nowrap">{fmtTime(d.last_update_at)}</td>
+          <td class="draft-title" title={d.title_sample ?? ''}>{d.title_sample ?? '—'}</td>
+          <td class="num">{d.item_count}</td>
+          <td>{d.editorial_hold ? <span class="held-badge">HELD</span> : <span style="color:#8b949e">pending</span>}</td>
+          <td>
+            {d.editorial_hold ? (
+              <button class="btn btn-release draft-action" data-story-id={d.story_id} data-action="release">Release</button>
+            ) : (
+              <button class="btn btn-hold draft-action" data-story-id={d.story_id} data-action="hold">Hold</button>
+            )}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
+
 <script define:vars={{ apiBase, adminToken }}>
   const rows = document.querySelectorAll('.run-row');
   rows.forEach(row => {
@@ -243,6 +305,38 @@ function fmtTime(iso: string): string {
         }
       }
       errRow.classList.add('open');
+    });
+  });
+
+  // Hold / Release buttons
+  document.querySelectorAll('.draft-action').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const button = btn as HTMLButtonElement;
+      const storyId = button.dataset.storyId;
+      const action = button.dataset.action;
+      if (!storyId || !action) return;
+
+      button.disabled = true;
+      button.textContent = '…';
+
+      try {
+        const fetchHeaders = adminToken ? { 'x-admin-token': adminToken } : {};
+        const res = await fetch(
+          `${apiBase}/api/v1/admin/story/${encodeURIComponent(storyId)}/${action}`,
+          { method: 'POST', headers: fetchHeaders },
+        );
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          button.disabled = false;
+          button.textContent = action === 'hold' ? 'Hold' : 'Release';
+          alert(`Failed: ${res.status}`);
+        }
+      } catch {
+        button.disabled = false;
+        button.textContent = action === 'hold' ? 'Hold' : 'Release';
+        alert('Network error');
+      }
     });
   });
 </script>

@@ -208,6 +208,80 @@ describe('Admin token auth', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/admin/drafts
+// ---------------------------------------------------------------------------
+
+describe('GET /api/v1/admin/drafts', () => {
+  it('returns 200 with drafts array when admin is enabled', async () => {
+    const res = await get('/api/v1/admin/drafts', makeEnv({ ADMIN_ENABLED: 'true', DB: EMPTY_DB }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; data: { drafts: unknown[] } };
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data.drafts)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/admin/story/:id/hold  &  /release
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/admin/story/:id/hold', () => {
+  function post(path: string, env: Env) {
+    return route(new Request(`http://local${path}`, { method: 'POST' }), env, ctx);
+  }
+
+  it('returns 200 when story is found and held', async () => {
+    const stmt = {
+      bind: function () { return this; },
+      run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
+      all: <T>() => Promise.resolve({ results: [] as T[], success: true, meta: {} }),
+      first: <T>() => Promise.resolve(null as T | null),
+    };
+    const db = { prepare: () => stmt } as unknown as D1Database;
+
+    const res = await post('/api/v1/admin/story/story-abc/hold', makeEnv({ ADMIN_ENABLED: 'true', DB: db }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; data: { story_id: string; editorial_hold: number } };
+    expect(body.ok).toBe(true);
+    expect(body.data.editorial_hold).toBe(1);
+  });
+
+  it('returns 404 when story is not found or not a draft', async () => {
+    const res = await post('/api/v1/admin/story/missing/hold', makeEnv({ ADMIN_ENABLED: 'true', DB: EMPTY_DB }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe('not_found');
+  });
+});
+
+describe('POST /api/v1/admin/story/:id/release', () => {
+  function post(path: string, env: Env) {
+    return route(new Request(`http://local${path}`, { method: 'POST' }), env, ctx);
+  }
+
+  it('returns 200 when story is found and released', async () => {
+    const stmt = {
+      bind: function () { return this; },
+      run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
+      all: <T>() => Promise.resolve({ results: [] as T[], success: true, meta: {} }),
+      first: <T>() => Promise.resolve(null as T | null),
+    };
+    const db = { prepare: () => stmt } as unknown as D1Database;
+
+    const res = await post('/api/v1/admin/story/story-abc/release', makeEnv({ ADMIN_ENABLED: 'true', DB: db }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; data: { story_id: string; editorial_hold: number } };
+    expect(body.ok).toBe(true);
+    expect(body.data.editorial_hold).toBe(0);
+  });
+
+  it('returns 404 when story is not found', async () => {
+    const res = await post('/api/v1/admin/story/missing/release', makeEnv({ ADMIN_ENABLED: 'true', DB: EMPTY_DB }));
+    expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/health — top_failing_sources field
 // ---------------------------------------------------------------------------
 

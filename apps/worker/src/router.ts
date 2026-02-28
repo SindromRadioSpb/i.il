@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@cloudflare/workers-types';
 import type { Env } from './index';
 import { getLastRun, getTopFailingSources } from './api/health';
-import { getRecentRuns, getRunErrors } from './api/admin';
+import { getRecentRuns, getRunErrors, getDraftStories, holdStory, releaseStory } from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
 import { runIngest } from './cron/ingest';
@@ -120,6 +120,42 @@ export async function route(
         }
         const errors = await getRunErrors(env.DB, runId);
         return adminJson({ ok: true, data: { errors } }, 200, corsOrigin);
+      }
+
+      // GET /api/v1/admin/drafts — draft stories pending editorial review
+      if (request.method === 'GET' && pathname === '/api/v1/admin/drafts') {
+        const drafts = await getDraftStories(env.DB);
+        return adminJson({ ok: true, data: { drafts } }, 200, corsOrigin);
+      }
+
+      // POST /api/v1/admin/story/:id/hold — pause auto-publishing for a draft
+      const holdMatch = /^\/api\/v1\/admin\/story\/([^/]+)\/hold$/.exec(pathname);
+      if (request.method === 'POST' && holdMatch !== null) {
+        const storyId = holdMatch[1]!;
+        const updated = await holdStory(env.DB, storyId);
+        if (!updated) {
+          return adminJson(
+            { ok: false, error: { code: 'not_found', message: 'Draft story not found', details: {} } },
+            404,
+            corsOrigin,
+          );
+        }
+        return adminJson({ ok: true, data: { story_id: storyId, editorial_hold: 1 } }, 200, corsOrigin);
+      }
+
+      // POST /api/v1/admin/story/:id/release — allow auto-publishing to resume
+      const releaseMatch = /^\/api\/v1\/admin\/story\/([^/]+)\/release$/.exec(pathname);
+      if (request.method === 'POST' && releaseMatch !== null) {
+        const storyId = releaseMatch[1]!;
+        const updated = await releaseStory(env.DB, storyId);
+        if (!updated) {
+          return adminJson(
+            { ok: false, error: { code: 'not_found', message: 'Story not found', details: {} } },
+            404,
+            corsOrigin,
+          );
+        }
+        return adminJson({ ok: true, data: { story_id: storyId, editorial_hold: 0 } }, 200, corsOrigin);
       }
 
       // POST /api/v1/admin/cron/trigger — fire runIngest outside cron schedule
