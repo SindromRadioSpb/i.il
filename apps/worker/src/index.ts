@@ -23,6 +23,8 @@ export interface Env {
   // Facebook crossposting
   FB_PAGE_ID?: string;
   PUBLIC_SITE_BASE_URL?: string;
+  // Cron budget — max wall-clock ms per run (default: 25000)
+  CRON_BUDGET_MS?: string;
 }
 
 const handler: ExportedHandler<Env> = {

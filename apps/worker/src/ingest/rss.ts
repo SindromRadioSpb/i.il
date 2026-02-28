@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { normalizeUrl, validateUrlForFetch } from '../normalize/url';
 import { hashHex } from '../normalize/hash';
+import { fetchWithTimeout } from '../net/fetch_with_timeout';
 import type { NormalizedEntry } from './types';
 
 const PARSER = new XMLParser({
@@ -115,10 +116,11 @@ function extractPubDate(item: XmlObj): unknown {
 export async function fetchRss(url: string, maxItems: number): Promise<NormalizedEntry[]> {
   validateUrlForFetch(url);
 
-  const resp = await fetch(url, {
-    headers: { 'User-Agent': 'NewsHub/0.1' },
-    signal: AbortSignal.timeout(10_000),
-  });
+  const resp = await fetchWithTimeout(
+    url,
+    { headers: { 'User-Agent': 'NewsHub/0.1' } },
+    { timeoutMs: 10_000, retries: 1 },
+  );
 
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status} fetching RSS from ${url}`);

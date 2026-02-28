@@ -10,6 +10,7 @@
  */
 
 import type { Env } from '../index';
+import type { RunBudget } from '../cron/budget';
 import { buildChain } from './provider_chain';
 import { applyGlossary } from './glossary';
 import { parseSections, formatBody, formatFull } from './format';
@@ -31,7 +32,7 @@ export interface SummaryCounters {
   failed: number;
 }
 
-export async function runSummaryPipeline(env: Env, runId: string): Promise<SummaryCounters> {
+export async function runSummaryPipeline(env: Env, runId: string, budget?: RunBudget): Promise<SummaryCounters> {
   const db = env.DB;
   const targetMin = parseInt(env.SUMMARY_TARGET_MIN ?? '400', 10) || 400;
   const targetMax = parseInt(env.SUMMARY_TARGET_MAX ?? '700', 10) || 700;
@@ -44,6 +45,9 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
   const stories = await getStoriesNeedingSummary(db, MAX_SUMMARIES_PER_RUN);
 
   for (const story of stories) {
+    // Stop early if cron time budget is running low (reserve 5s per LLM call).
+    if (budget && !budget.hasTime(5_000)) break;
+
     counters.attempted++;
     try {
       const items = await getStoryItemsForSummary(db, story.storyId);

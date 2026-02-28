@@ -39,6 +39,7 @@ export async function postToFacebook(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message, link, access_token: token }),
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {
