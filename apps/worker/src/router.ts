@@ -17,6 +17,20 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+// Admin routes use restricted CORS (ops-page origin only, not wildcard).
+// allowedOrigin comes from PUBLIC_SITE_BASE_URL env var; if empty no CORS header is emitted.
+function adminJson(data: unknown, status = 200, allowedOrigin?: string): Response {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  };
+  if (allowedOrigin) {
+    headers['access-control-allow-origin'] = allowedOrigin;
+    headers['access-control-allow-headers'] = 'x-admin-token';
+  }
+  return new Response(JSON.stringify(data), { status, headers });
+}
+
 function err(status: number, code: string, message: string, details: Record<string, unknown> = {}) {
   return json({ ok: false, error: { code, message, details } }, status);
 }
@@ -49,33 +63,80 @@ export async function route(
       });
     }
 
-    // Admin routes — gated by ADMIN_ENABLED
+    // Admin routes — gated by ADMIN_ENABLED and optional ADMIN_SECRET_TOKEN
     if (pathname.startsWith('/api/v1/admin/')) {
+      const corsOrigin = env.PUBLIC_SITE_BASE_URL || undefined;
+
+      // CORS preflight — respond with the ops-page origin (or no CORS if not configured)
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: corsOrigin
+            ? {
+                'access-control-allow-origin': corsOrigin,
+                'access-control-allow-methods': 'GET, POST, OPTIONS',
+                'access-control-allow-headers': 'x-admin-token',
+                'access-control-max-age': '86400',
+              }
+            : {},
+        });
+      }
+
       if (env.ADMIN_ENABLED !== 'true') {
-        return err(403, 'forbidden', 'Admin endpoints are disabled');
+        return adminJson(
+          { ok: false, error: { code: 'forbidden', message: 'Admin endpoints are disabled', details: {} } },
+          403,
+          corsOrigin,
+        );
+      }
+
+      // Token check — only enforced when ADMIN_SECRET_TOKEN secret is configured
+      if (env.ADMIN_SECRET_TOKEN) {
+        const provided = request.headers.get('x-admin-token');
+        if (provided !== env.ADMIN_SECRET_TOKEN) {
+          return adminJson(
+            { ok: false, error: { code: 'forbidden', message: 'Invalid or missing admin token', details: {} } },
+            403,
+            corsOrigin,
+          );
+        }
       }
 
       // GET /api/v1/admin/runs
       if (request.method === 'GET' && pathname === '/api/v1/admin/runs') {
         const runs = await getRecentRuns(env.DB);
-        return json({ ok: true, data: { runs } });
+        return adminJson({ ok: true, data: { runs } }, 200, corsOrigin);
       }
 
       // GET /api/v1/admin/errors?run_id=X
       if (request.method === 'GET' && pathname === '/api/v1/admin/errors') {
         const runId = url.searchParams.get('run_id');
-        if (!runId) return err(400, 'invalid_request', 'run_id query param required');
+        if (!runId) {
+          return adminJson(
+            { ok: false, error: { code: 'invalid_request', message: 'run_id query param required', details: {} } },
+            400,
+            corsOrigin,
+          );
+        }
         const errors = await getRunErrors(env.DB, runId);
-        return json({ ok: true, data: { errors } });
+        return adminJson({ ok: true, data: { errors } }, 200, corsOrigin);
       }
 
       // POST /api/v1/admin/cron/trigger — fire runIngest outside cron schedule
       if (request.method === 'POST' && pathname === '/api/v1/admin/cron/trigger') {
         if (env.CRON_ENABLED !== 'true') {
-          return json({ ok: false, error: { code: 'cron_disabled', message: 'CRON_ENABLED is not true' } }, 400);
+          return adminJson(
+            { ok: false, error: { code: 'cron_disabled', message: 'CRON_ENABLED is not true' } },
+            400,
+            corsOrigin,
+          );
         }
         ctx.waitUntil(runIngest(env));
-        return json({ ok: true, message: 'Cron run triggered. Check /api/v1/admin/runs in ~15s.' });
+        return adminJson(
+          { ok: true, message: 'Cron run triggered. Check /api/v1/admin/runs in ~15s.' },
+          200,
+          corsOrigin,
+        );
       }
     }
 

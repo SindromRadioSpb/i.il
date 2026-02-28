@@ -169,6 +169,45 @@ describe('POST /api/v1/admin/cron/trigger', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Admin token auth (ADMIN_SECRET_TOKEN)
+// ---------------------------------------------------------------------------
+
+describe('Admin token auth', () => {
+  it('passes when ADMIN_SECRET_TOKEN is not configured (no token required)', async () => {
+    const res = await get('/api/v1/admin/runs', makeEnv({ ADMIN_ENABLED: 'true' }));
+    expect(res.status).toBe(200);
+  });
+
+  it('returns 403 when ADMIN_SECRET_TOKEN is set but x-admin-token header is missing', async () => {
+    const env = makeEnv({ ADMIN_ENABLED: 'true', ADMIN_SECRET_TOKEN: 'secret-abc' });
+    const res = await get('/api/v1/admin/runs', env);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe('forbidden');
+  });
+
+  it('returns 403 when wrong token is provided', async () => {
+    const env = makeEnv({ ADMIN_ENABLED: 'true', ADMIN_SECRET_TOKEN: 'secret-abc' });
+    const req = new Request('http://local/api/v1/admin/runs', {
+      method: 'GET',
+      headers: { 'x-admin-token': 'wrong-token' },
+    });
+    const res = await route(req, env, ctx);
+    expect(res.status).toBe(403);
+  });
+
+  it('allows request when correct token is provided', async () => {
+    const env = makeEnv({ ADMIN_ENABLED: 'true', ADMIN_SECRET_TOKEN: 'secret-abc' });
+    const req = new Request('http://local/api/v1/admin/runs', {
+      method: 'GET',
+      headers: { 'x-admin-token': 'secret-abc' },
+    });
+    const res = await route(req, env, ctx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/health — top_failing_sources field
 // ---------------------------------------------------------------------------
 

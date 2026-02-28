@@ -27,6 +27,9 @@ export interface Env {
   // Cron budget — max wall-clock ms per run (default: 25000)
   CRON_BUDGET_MS?: string;
   SERVICE_ENV?: string;
+  // Admin security — set via `wrangler secret put ADMIN_SECRET_TOKEN`
+  // If set, all /api/v1/admin/* routes require `x-admin-token: <value>` header.
+  ADMIN_SECRET_TOKEN?: string;
 }
 
 const handler: ExportedHandler<Env> = {
