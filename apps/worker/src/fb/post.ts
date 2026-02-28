@@ -103,7 +103,7 @@ export async function runFbCrosspost(
 
   if (env.FB_POSTING_ENABLED !== 'true') return counters;
 
-  const token = env.FB_PAGE_ACCESS_TOKEN;
+  const token = env.FB_PAGE_TOKEN ?? env.FB_PAGE_ACCESS_TOKEN;
   const pageId = env.FB_PAGE_ID;
   if (!token || !pageId) return counters;
 

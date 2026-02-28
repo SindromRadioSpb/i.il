@@ -15,6 +15,7 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   GEMINI_API_KEY?: string;
   FB_PAGE_ACCESS_TOKEN?: string;
+  FB_PAGE_TOKEN?: string;        // alias — secret was set with this name
   // Model overrides (defaults set in wrangler.toml vars)
   ANTHROPIC_MODEL?: string;
   GEMINI_MODEL?: string;
