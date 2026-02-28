@@ -38,8 +38,8 @@ Base path:
 | HTTP status | `error.code` | When |
 |-------------|-------------|------|
 | 400 | `invalid_request` | Invalid query parameter (bad limit, bad cursor format) |
-| 401 | `unauthorized` | Missing or invalid `X-Admin-Secret` header |
-| 403 | `forbidden` | Admin endpoint accessed but `ADMIN_ENABLED=false` |
+| 400 | `cron_disabled` | Admin cron trigger called but `CRON_ENABLED=false` |
+| 403 | `forbidden` | Admin endpoint disabled (`ADMIN_ENABLED=false`) or missing/invalid `x-admin-token` header |
 | 404 | `not_found` | Story not found, or unrecognized route |
 | 500 | `internal_error` | Unhandled server error (DB failure, unexpected exception) |
 
@@ -57,19 +57,7 @@ Base path:
 }
 ```
 
-401 Unauthorized:
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "unauthorized",
-    "message": "Missing or invalid admin secret",
-    "details": {}
-  }
-}
-```
-
-403 Forbidden:
+403 Forbidden (token):
 ```json
 {
   "ok": false,
@@ -146,29 +134,34 @@ Returns safe operational summary.
   "service": {
     "name": "news-hub",
     "version": "string",
-    "env": "dev|staging|prod",
+    "env": "dev|prod",
     "now_utc": "2026-02-27T08:00:00.000Z"
   },
   "last_run": {
-    "run_id": "string|null",
-    "started_at": "ISO8601|null",
+    "run_id": "string",
+    "started_at": "ISO8601",
     "finished_at": "ISO8601|null",
-    "status": "success|partial_failure|failure|null",
-    "counters": {
-      "sources_ok": 0,
-      "sources_failed": 0,
-      "items_found": 0,
-      "items_new": 0,
-      "stories_new": 0,
-      "stories_updated": 0,
-      "published_web": 0,
-      "published_fb": 0,
-      "errors_total": 0
-    },
+    "status": "success|partial_failure|failure",
+    "sources_ok": 0,
+    "sources_failed": 0,
+    "items_found": 0,
+    "items_new": 0,
+    "stories_new": 0,
+    "stories_updated": 0,
+    "published_web": 0,
+    "published_fb": 0,
+    "errors_total": 0,
     "duration_ms": 0
-  }
+  },
+  "top_failing_sources": [
+    { "source_id": "string", "error_count": 0 }
+  ]
 }
 ```
+
+**Notes**
+- `last_run` is `null` when no runs have occurred yet.
+- `top_failing_sources` lists up to 5 sources with the most error events in the last 24 hours.
 
 **Errors**
 - 500: returns standard error response with code `internal_error`
@@ -264,47 +257,164 @@ Returns full story details.
 
 ---
 
-## 3) Admin endpoints (dev-only, gated)
+## 3) Admin endpoints (gated)
 
-These endpoints MUST be disabled by default in production and require auth when enabled.
+Admin endpoints require:
+1. `ADMIN_ENABLED=true` (set in `wrangler.toml`)
+2. `x-admin-token: <ADMIN_SECRET_TOKEN>` header (when `ADMIN_SECRET_TOKEN` secret is configured)
 
-Auth mechanism (default):
-- `ADMIN_ENABLED=true`
-- `X-Admin-Secret: <ADMIN_SHARED_SECRET>`
+CORS: Admin endpoints emit `Access-Control-Allow-Origin: <PUBLIC_SITE_BASE_URL>` (not wildcard).
+Preflight: `OPTIONS` requests to `/api/v1/admin/*` are handled with `204 No Content`.
 
-### 3.1 POST `/api/v1/admin/cron/run`
-Triggers a manual ingest run (dev only).
-
-**Response 200**
-```json
-{
-  "ok": true,
-  "data": { "run_id": "string" }
-}
-```
-
-**Errors**
-- 401: missing/invalid admin secret → `unauthorized`
-- 403: admin disabled → `forbidden`
-- 500: `internal_error`
+**Auth errors:**
+- 403 `forbidden`: `ADMIN_ENABLED=false` → `"Admin endpoints are disabled"`
+- 403 `forbidden`: token mismatch/missing → `"Invalid or missing admin token"`
 
 ---
 
-### 3.2 POST `/api/v1/admin/story/{story_id}/rebuild`
-Rebuilds summary for a story (dev only).
+### 3.1 GET `/api/v1/admin/runs`
+Returns last 20 cron run records.
 
 **Response 200**
 ```json
 {
   "ok": true,
-  "data": { "story_id": "string", "summary_version": 1 }
+  "data": {
+    "runs": [
+      {
+        "run_id": "string",
+        "started_at": "ISO8601",
+        "finished_at": "ISO8601|null",
+        "status": "success|partial_failure|failure",
+        "sources_ok": 0,
+        "sources_failed": 0,
+        "items_found": 0,
+        "items_new": 0,
+        "stories_new": 0,
+        "stories_updated": 0,
+        "published_web": 0,
+        "published_fb": 0,
+        "errors_total": 0,
+        "duration_ms": 0
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 3.2 GET `/api/v1/admin/errors?run_id=<id>`
+Returns all error events for a specific run.
+
+**Query params**
+- `run_id` (required)
+
+**Response 200**
+```json
+{
+  "ok": true,
+  "data": {
+    "errors": [
+      {
+        "event_id": "string",
+        "run_id": "string",
+        "phase": "string",
+        "source_id": "string|null",
+        "story_id": "string|null",
+        "code": "string|null",
+        "message": "string|null",
+        "created_at": "ISO8601"
+      }
+    ]
+  }
 }
 ```
 
 **Errors**
-- 401/403 as above
-- 404: story not found
-- 500: internal
+- 400 `invalid_request`: `run_id` query param missing
+
+---
+
+### 3.3 GET `/api/v1/admin/drafts`
+Returns draft stories pending editorial review plus aggregated counts.
+
+**Response 200**
+```json
+{
+  "ok": true,
+  "data": {
+    "drafts": [
+      {
+        "story_id": "string",
+        "start_at": "ISO8601",
+        "last_update_at": "ISO8601",
+        "editorial_hold": 0,
+        "item_count": 0,
+        "title_sample": "string|null"
+      }
+    ],
+    "counts": {
+      "total": 0,
+      "held": 0,
+      "pending": 0
+    }
+  }
+}
+```
+
+---
+
+### 3.4 POST `/api/v1/admin/story/{story_id}/hold`
+Sets `editorial_hold=1` on a draft story — prevents auto-publishing.
+
+**Response 200**
+```json
+{
+  "ok": true,
+  "data": { "story_id": "string", "editorial_hold": 1 }
+}
+```
+
+**Errors**
+- 404 `not_found`: story not found or not in `draft` state
+
+---
+
+### 3.5 POST `/api/v1/admin/story/{story_id}/release`
+Sets `editorial_hold=0` — allows auto-publishing to resume.
+
+**Response 200**
+```json
+{
+  "ok": true,
+  "data": { "story_id": "string", "editorial_hold": 0 }
+}
+```
+
+**Errors**
+- 404 `not_found`: story not found
+
+---
+
+### 3.6 POST `/api/v1/admin/cron/trigger`
+Triggers a manual ingest run outside the cron schedule.
+
+**Notes:**
+- Uses `ctx.waitUntil` — the Worker may terminate before the run completes.
+- Reliable only for testing. Prefer the scheduled cron for production.
+- Requires `CRON_ENABLED=true`.
+
+**Response 200**
+```json
+{
+  "ok": true,
+  "message": "Cron run triggered. Check /api/v1/admin/runs in ~15s."
+}
+```
+
+**Errors**
+- 400 `cron_disabled`: `CRON_ENABLED` is not `"true"`
 
 ---
 

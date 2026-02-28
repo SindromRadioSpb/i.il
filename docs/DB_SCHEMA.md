@@ -67,10 +67,12 @@ Required fields:
 - `category` (TEXT enum; not null default 'other')
 - `risk_level` (TEXT enum; not null default 'low')
 - `state` (TEXT enum; not null default 'draft')
+- `editorial_hold` (INTEGER, not null default 0) — `1` = held (skip auto-publish/summary), `0` = normal *(added in migration 002)*
 
 **Indexes**
 - `(last_update_at DESC)` — feed ordering
 - `(state, last_update_at DESC)` — published feed fast path
+- `(editorial_hold) WHERE editorial_hold = 1` — fast hold filter
 
 **Optional uniqueness**
 - If `story_key` is used, prefer `UNIQUE(story_key)`.
@@ -187,6 +189,7 @@ Enum definitions:
 | `stories.category` | `politics` \| `security` \| `economy` \| `society` \| `tech` \| `health` \| `culture` \| `sport` \| `weather` \| `other` |
 | `stories.risk_level` | `low` \| `medium` \| `high` |
 | `stories.state` | `draft` \| `published` \| `hidden` |
+| `stories.editorial_hold` | `0` (normal) \| `1` (held) |
 | `publications.web_status` | `pending` \| `published` \| `failed` |
 | `publications.fb_status` | `disabled` \| `pending` \| `posted` \| `failed` \| `auth_error` \| `rate_limited` |
 | `runs.status` | `success` \| `partial_failure` \| `failure` |
@@ -219,7 +222,13 @@ Note: D1 (SQLite) CHECK constraints are parsed but enforcement behavior may vary
 - A Cron run must not proceed when lock lease is valid:
   - `run_lock.lease_until > now` blocks new work.
 
-### 4.5 Minimal retention invariant
+### 4.5 Editorial hold invariant
+- When `stories.editorial_hold = 1`:
+  - `getStoriesNeedingSummary` skips the story (summary pipeline does not run).
+  - Story is not auto-published until `editorial_hold` is reset to `0`.
+  - Hold/release is controlled via admin API only.
+
+### 4.6 Minimal retention invariant
 - `snippet_he` must be truncated to ≤ 500 characters (enforced by code; validated by tests).
 - No column stores full article text. `summary_ru` stores only the generated Russian summary (400–700 chars target).
 

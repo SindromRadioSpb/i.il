@@ -333,7 +333,7 @@ function fmtTime(iso: string): string {
   // Hold / Release buttons
   document.querySelectorAll('.draft-action').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const button = btn as HTMLButtonElement;
+      const button = /** @type {HTMLButtonElement} */ (btn);
       const storyId = button.dataset.storyId;
       const action = button.dataset.action;
       if (!storyId || !action) return;

@@ -39,7 +39,8 @@ If CI is not green, fix it before starting new work.
 | **Workers-types conflict** | Adding DOM lib to worker tsconfig | Worker tsconfig must have `"lib": ["ES2022"]` only — never add `"DOM"` |
 | **Test fixture drift** | Fixtures don't reflect current API shape | Keep fixtures in `apps/worker/test/fixtures/`; update when schema changes |
 | **Secrets in logs** | Logging env vars or request headers | Never log: tokens, credentials, full headers; see `docs/SECURITY.md` |
-| **Breaking Env interface** | Adding/removing worker env vars | Update `Env` type in `src/index.ts` and `wrangler.toml [vars]` together |
+| **Breaking Env interface** | Adding/removing worker env vars | Update `Env` type in `src/index.ts` AND `wrangler.toml [vars]` (or document as secret-only) together |
+| **Stale CONFIG_REFERENCE** | Adding env vars without updating docs | Update `docs/CONFIG_REFERENCE.md` whenever `Env` interface changes |
 
 ---
 
@@ -81,7 +82,7 @@ bash scripts/ci.sh
 ### DoD checklist
 - [ ] ESLint passes (no warnings promoted to errors)
 - [ ] Typecheck passes (`tsc --noEmit`)
-- [ ] Tests pass (all suites green)
+- [ ] Tests pass (all suites green, currently 215+ tests in worker)
 - [ ] No new `any` (or justified with comment)
 - [ ] Public API contract unchanged, or `docs/API_CONTRACT.md` updated
 - [ ] No secrets / log leaks introduced
