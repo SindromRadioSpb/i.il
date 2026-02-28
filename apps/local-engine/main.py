@@ -180,6 +180,8 @@ async def _phase_summary(
             published=sc.published,
             skipped=sc.skipped,
             failed=sc.failed,
+            wow_ok=sc.wow_caption_ok,
+            wow_fail=sc.wow_caption_fail,
             elapsed_ms=elapsed_ms,
         )
         await metrics.record(db, "summary", "attempted", sc.attempted)
@@ -187,6 +189,9 @@ async def _phase_summary(
         await metrics.record(db, "summary", "skipped", sc.skipped)
         await metrics.record(db, "summary", "failed", sc.failed)
         await metrics.record(db, "summary", "duration_ms", elapsed_ms)
+        await metrics.record(db, "wow_story", "caption_ok", sc.wow_caption_ok)
+        await metrics.record(db, "wow_story", "caption_fail", sc.wow_caption_fail)
+        await metrics.record(db, "wow_story", "rewrite_attempts", sc.wow_rewrite_attempts)
 
     except Exception as exc:
         counters.errors_total += 1

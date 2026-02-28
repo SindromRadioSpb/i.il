@@ -11,7 +11,7 @@ import re
 
 import aiosqlite
 
-from db.schema import ALL_DDL
+from db.schema import ALL_DDL, DDL_ALTER_MIGRATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,23 @@ async def apply_migrations(db: aiosqlite.Connection) -> None:
                 logger.error("Migration statement failed: %s | error: %s", stmt[:80], exc)
                 raise
 
+    # ALTER TABLE migrations — applied after CREATE TABLE.
+    # "duplicate column name" means the column already exists → safe to skip.
+    alters_applied = 0
+    for stmt in DDL_ALTER_MIGRATIONS:
+        try:
+            await db.execute(stmt)
+            alters_applied += 1
+        except Exception as exc:
+            if "duplicate column name" in str(exc).lower():
+                pass  # column already exists from a previous run
+            else:
+                logger.warning("ALTER migration skipped: %s | %s", stmt[:80], exc)
+
     await db.commit()
     logger.info(
-        "Migrations applied: tables=%d indexes=%d",
+        "Migrations applied: tables=%d indexes=%d alters=%d",
         tables_created,
         indexes_created,
+        alters_applied,
     )

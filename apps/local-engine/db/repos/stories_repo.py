@@ -117,6 +117,8 @@ class StoryItemForSummary:
     title_he: str
     source_id: str
     published_at: str | None
+    source_url: str = ""        # original article URL — used as story_url fallback
+    snippet_he: str | None = None   # RSS description snippet (optional extra context)
 
 
 async def get_stories_needing_summary(
@@ -160,7 +162,9 @@ async def get_story_items_for_summary(
         SELECT i.item_id,
                i.title_he,
                i.source_id,
-               i.published_at
+               i.published_at,
+               i.source_url,
+               i.snippet_he
           FROM story_items si
           JOIN items i ON i.item_id = si.item_id
          WHERE si.story_id = ?
@@ -177,6 +181,8 @@ async def get_story_items_for_summary(
             title_he=row["title_he"],
             source_id=row["source_id"],
             published_at=row["published_at"],
+            source_url=row["source_url"] or "",
+            snippet_he=row["snippet_he"],
         )
         for row in rows
     ]
@@ -191,6 +197,7 @@ async def update_story_summary(
     risk_level: str,
     category: str = "other",
     hashtags: str | None = None,
+    fb_caption: str | None = None,
 ) -> None:
     """Persist a generated summary: update story → published + create publication row.
 
@@ -208,10 +215,11 @@ async def update_story_summary(
                risk_level      = ?,
                state           = 'published',
                category        = ?,
-               hashtags        = ?
+               hashtags        = ?,
+               fb_caption      = ?
          WHERE story_id = ?
         """,
-        (title_ru, summary_ru, summary_hash, risk_level, category, hashtags, story_id),
+        (title_ru, summary_ru, summary_hash, risk_level, category, hashtags, fb_caption, story_id),
     )
     await db.execute(
         """

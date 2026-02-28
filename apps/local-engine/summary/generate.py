@@ -1,19 +1,20 @@
 """summary/generate.py — Summary generation pipeline for the local engine.
 
 Orchestrates: draft stories → memoization → Ollama → glossary → guards →
-auto-category → hashtags → persist as published.
+auto-category → hashtags → WOW-story FB caption → persist as published.
 
 Key differences from the TS Worker pipeline:
 - No time budget: local machine can run as long as needed.
 - MAX_SUMMARIES_PER_RUN defaults to 50 (vs 5 in Worker).
 - Uses Ollama instead of Gemini/Claude API.
 - Auto-generates category and hashtags via Ollama (best-effort).
+- Generates WOW-story FB caption (3-pass: fact-extract → draft → critic).
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 import aiosqlite
@@ -25,6 +26,7 @@ from db.repos.stories_repo import (
     update_story_summary,
 )
 from summary.categories import classify_category, generate_hashtags
+from summary.fact_extract import extract_facts
 from summary.format import format_body, format_full, parse_sections
 from summary.glossary import apply_glossary
 from summary.guards import (
@@ -35,6 +37,7 @@ from summary.guards import (
 )
 from summary.ollama import OllamaClient
 from summary.prompt import SummaryItem, build_system_prompt, build_user_message
+from summary.wow_story import WowCounters, compose_wow_post
 
 
 @dataclass
@@ -43,6 +46,10 @@ class SummaryCounters:
     published: int = 0
     skipped: int = 0
     failed: int = 0
+    # WOW-story FB caption stats (best-effort — never block publish)
+    wow_caption_ok: int = 0
+    wow_caption_fail: int = 0
+    wow_rewrite_attempts: int = 0
 
 
 def _memoization_hash(item_ids: list[str], risk_level: str) -> str:
@@ -52,6 +59,35 @@ def _memoization_hash(item_ids: list[str], risk_level: str) -> str:
     """
     key = ",".join(sorted(item_ids)) + ":" + risk_level
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+async def _generate_fb_caption(
+    ollama: OllamaClient,
+    items: list,
+    risk_level: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[str | None, WowCounters]:
+    """Generate WOW-story FB caption via 3-pass Ollama pipeline (best-effort).
+
+    Uses the first item's source_url as story_url for the "Подробнее →" line.
+    Never raises — failures result in (None, counters) and story is published
+    without a WOW caption (FB falls back to legacy title + summary format).
+    """
+    story_url = items[0].source_url if items else ""
+    try:
+        facts = await extract_facts(
+            ollama, items, story_url, risk_level, client=client
+        )
+        if facts is None:
+            wc = WowCounters()
+            wc.caption_fail = 1
+            return None, wc
+        return await compose_wow_post(ollama, facts, client=client)
+    except Exception:
+        wc = WowCounters()
+        wc.caption_fail = 1
+        return None, wc
 
 
 async def run_summary_pipeline(
@@ -76,7 +112,7 @@ async def run_summary_pipeline(
         http_client: Optional shared httpx client (injected for tests).
 
     Returns:
-        SummaryCounters with attempted/published/skipped/failed.
+        SummaryCounters with attempted/published/skipped/failed + WOW stats.
     """
     counters = SummaryCounters()
     stories = await get_stories_needing_summary(db, limit=max_summaries)
@@ -95,7 +131,7 @@ async def run_summary_pipeline(
                 counters.skipped += 1
                 continue
 
-            # Build prompts and call Ollama.
+            # ── Pass 0: Build prompts and call Ollama (5-section format) ─────
             summary_items = [
                 SummaryItem(
                     item_id=i.item_id,
@@ -127,7 +163,7 @@ async def run_summary_pipeline(
             body = format_body(parsed)
             full_text = format_full(parsed)
 
-            # Guards
+            # Guards (5-section format)
             guard_results = [
                 guard_length(body, target_min, target_max),
                 guard_forbidden_words(full_text),
@@ -147,7 +183,9 @@ async def run_summary_pipeline(
                 counters.failed += 1
                 continue
 
-            # Auto-category + hashtags (best-effort — failures don't block publish)
+            # ── Best-effort enrichment (failures don't block publish) ────────
+
+            # Auto-category + hashtags (used by CF sync / web)
             category = await classify_category(
                 ollama, parsed.title, full_text, client=http_client
             )
@@ -155,6 +193,14 @@ async def run_summary_pipeline(
                 ollama, parsed.title, category, client=http_client
             )
             hashtags_str = " ".join(hashtag_list) if hashtag_list else None
+
+            # WOW-story FB caption (Passes 1–3)
+            fb_caption, wc = await _generate_fb_caption(
+                ollama, items, story.risk_level, client=http_client
+            )
+            counters.wow_caption_ok += wc.caption_ok
+            counters.wow_caption_fail += wc.caption_fail
+            counters.wow_rewrite_attempts += wc.rewrite_attempts
 
             await update_story_summary(
                 db,
@@ -165,6 +211,7 @@ async def run_summary_pipeline(
                 story.risk_level,
                 category=category,
                 hashtags=hashtags_str,
+                fb_caption=fb_caption,
             )
             counters.published += 1
 

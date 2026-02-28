@@ -270,6 +270,17 @@ CREATE TABLE IF NOT EXISTS item_embeddings (
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ALTER TABLE migrations — applied separately with duplicate-column tolerance.
+# Add new entries here when a column is added to an existing table.
+# ─────────────────────────────────────────────────────────────────────────────
+
+DDL_ALTER_MIGRATIONS: list[str] = [
+    # PATCH-WOW: store WOW-story FB caption separately from 5-section summary_ru
+    "ALTER TABLE stories ADD COLUMN fb_caption TEXT",
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Full ordered list of DDL statements applied by migrate.py
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -2,10 +2,16 @@
 
 Uses real in-memory SQLite + mocked OllamaClient to verify the full
 generate → persist lifecycle without requiring a running Ollama instance.
+
+WOW-story note: the pipeline makes 5+ Ollama calls per story
+(summary, category, hashtags, fact_extract, draft_wow[, critic]).
+Tests that only provide 3 mock responses let WOW generation fail silently
+(best-effort) — stories are still published and counters.failed stays 0.
 """
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -252,3 +258,80 @@ async def test_pipeline_respects_max_summaries_limit(db, run_id):
 
     counters = await run_summary_pipeline(db, ollama, run_id, max_summaries=1)
     assert counters.attempted <= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WOW-story FB caption
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A valid WOW-story FB caption that passes all guards.
+# Note: numbers list is empty for this story (no numbers in Hebrew title).
+_VALID_FACTS_JSON = json.dumps({
+    "event_type": "society",
+    "location": "Тель-Авив",
+    "time_ref": "утром",
+    "actors": [],
+    "numbers": [],
+    "claims": ["Землетрясение произошло в Тель-Авиве", "Жертв нет"],
+    "uncertainty_notes": [],
+    "sources": ["ynet"],
+    "risk_level": "low",
+    "story_url": "https://ynet.co.il/item1",
+})
+
+_VALID_WOW = (
+    "Землетрясение в Тель-Авиве: всё под контролем\n\n"
+    "Ранним утром в районе Тель-Авива произошло сейсмическое событие магнитудой по шкале Рихтера. "
+    "По данным Геологической службы Израиля, эпицентр находился к западу от центра города на значительной глубине. "
+    "Официально подтверждено: жертв и серьёзных структурных разрушений в результате толчков нет. "
+    "Сейсмологи продолжают круглосуточный мониторинг ситуации и призывают жителей сохранять спокойствие.\n\n"
+    "Ощущали ли вы это землетрясение сегодня утром?\n\n"
+    "Подробнее → https://ynet.co.il/item1"
+)
+
+
+async def test_pipeline_generates_fb_caption(db, run_id):
+    """Pipeline stores fb_caption in DB when WOW generation succeeds."""
+    await _setup_story(db)
+    # 5 calls: summary + category + hashtags + fact_extract + draft_wow
+    ollama = _make_ollama([
+        _VALID_SUMMARY,
+        _VALID_CATEGORY,
+        _VALID_HASHTAGS,
+        _VALID_FACTS_JSON,
+        _VALID_WOW,
+    ])
+
+    counters = await run_summary_pipeline(db, ollama, run_id)
+
+    assert counters.published == 1
+    assert counters.failed == 0
+    assert counters.wow_caption_ok == 1
+    assert counters.wow_caption_fail == 0
+
+    async with db.execute("SELECT fb_caption FROM stories LIMIT 1") as cur:
+        row = await cur.fetchone()
+    assert row["fb_caption"] is not None
+    assert "Подробнее →" in row["fb_caption"]
+    assert "#" not in row["fb_caption"]
+    # No section headers
+    assert "Что произошло:" not in row["fb_caption"]
+    assert "Почему важно:" not in row["fb_caption"]
+
+
+async def test_pipeline_publishes_without_fb_caption_on_wow_failure(db, run_id):
+    """Story is published even when WOW story generation fails (best-effort)."""
+    await _setup_story(db)
+    # Only 3 responses — WOW generation will run out of mocked responses and fail silently
+    ollama = _make_ollama([_VALID_SUMMARY, _VALID_CATEGORY, _VALID_HASHTAGS])
+
+    counters = await run_summary_pipeline(db, ollama, run_id)
+
+    assert counters.published == 1
+    assert counters.failed == 0
+    assert counters.wow_caption_fail == 1
+
+    async with db.execute("SELECT state, fb_caption FROM stories LIMIT 1") as cur:
+        row = await cur.fetchone()
+    assert row["state"] == "published"
+    # fb_caption may be None — WOW failed silently, story still published

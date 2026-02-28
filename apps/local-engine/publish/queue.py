@@ -146,7 +146,8 @@ def _update_rate_state(state: dict | None, now: datetime) -> dict:
 
 async def _get_story(db: aiosqlite.Connection, story_id: str) -> dict | None:
     async with db.execute(
-        "SELECT story_id, title_ru, summary_ru, hashtags FROM stories WHERE story_id = ?",
+        "SELECT story_id, title_ru, summary_ru, hashtags, fb_caption"
+        " FROM stories WHERE story_id = ?",
         (story_id,),
     ) as cur:
         row = await cur.fetchone()
@@ -154,6 +155,15 @@ async def _get_story(db: aiosqlite.Connection, story_id: str) -> dict | None:
 
 
 def _format_message(story: dict) -> str:
+    """Build the FB post message.
+
+    Prefers the WOW-story fb_caption when present (organic mini-story format).
+    Falls back to legacy title + summary + hashtags for stories generated
+    before the WOW pipeline was deployed.
+    """
+    if story.get("fb_caption"):
+        return story["fb_caption"]
+    # Legacy fallback: title + 5-section summary + hashtags
     parts = [p for p in (story.get("title_ru"), story.get("summary_ru")) if p]
     if story.get("hashtags"):
         parts.append(story["hashtags"])
