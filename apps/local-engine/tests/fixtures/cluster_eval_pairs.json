@@ -1,0 +1,72 @@
+[
+  {
+    "item_key_a": "key_attack_1",
+    "item_key_b": "key_attack_2",
+    "same_story": true,
+    "title_a": "פיגוע ירי בתל אביב שני נפגעים",
+    "title_b": "יורים פתחו אש בתל אביב פצועים מפונים לבית חולים"
+  },
+  {
+    "item_key_a": "key_attack_1",
+    "item_key_b": "key_weather_1",
+    "same_story": false,
+    "title_a": "פיגוע ירי בתל אביב שני נפגעים",
+    "title_b": "גשם כבד וברד בצפון הארץ"
+  },
+  {
+    "item_key_a": "key_election_1",
+    "item_key_b": "key_election_2",
+    "same_story": true,
+    "title_a": "נתניהו הכריז על בחירות מוקדמות",
+    "title_b": "ראש הממשלה הודיע על הליכות בחירות בנובמבר"
+  },
+  {
+    "item_key_a": "key_election_1",
+    "item_key_b": "key_economy_1",
+    "same_story": false,
+    "title_a": "נתניהו הכריז על בחירות מוקדמות",
+    "title_b": "בנק ישראל העלה ריבית ל-4.75 אחוז"
+  },
+  {
+    "item_key_a": "key_hostage_1",
+    "item_key_b": "key_hostage_2",
+    "same_story": true,
+    "title_a": "שחרור חטופים מעזה שלושה ישראלים חזרו הביתה",
+    "title_b": "עסקת חטופים חדשה שלושה משוחררים נחתו בישראל"
+  },
+  {
+    "item_key_a": "key_hostage_1",
+    "item_key_b": "key_attack_1",
+    "same_story": false,
+    "title_a": "שחרור חטופים מעזה שלושה ישראלים חזרו הביתה",
+    "title_b": "פיגוע ירי בתל אביב שני נפגעים"
+  },
+  {
+    "item_key_a": "key_idf_1",
+    "item_key_b": "key_idf_2",
+    "same_story": true,
+    "title_a": "צבא ישראל תקף מטרות חיזבאללה בלבנון",
+    "title_b": "חיל האוויר פגע בתשתיות חיזבאללה בדרום לבנון"
+  },
+  {
+    "item_key_a": "key_idf_1",
+    "item_key_b": "key_hostage_2",
+    "same_story": false,
+    "title_a": "צבא ישראל תקף מטרות חיזבאללה בלבנון",
+    "title_b": "עסקת חטופים חדשה שלושה משוחררים נחתו בישראל"
+  },
+  {
+    "item_key_a": "key_tech_1",
+    "item_key_b": "key_tech_2",
+    "same_story": true,
+    "title_a": "חברת הייטק ישראלית גייסה 200 מיליון דולר",
+    "title_b": "סטארט-אפ ישראלי השלים גיוס ענק של מאות מיליוני דולרים"
+  },
+  {
+    "item_key_a": "key_tech_1",
+    "item_key_b": "key_weather_1",
+    "same_story": false,
+    "title_a": "חברת הייטק ישראלית גייסה 200 מיליון דולר",
+    "title_b": "גשם כבד וברד בצפון הארץ"
+  }
+]
