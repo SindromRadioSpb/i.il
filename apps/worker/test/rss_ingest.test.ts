@@ -87,12 +87,13 @@ describe('fetchRss — happy path', () => {
 // ---------------------------------------------------------------------------
 describe('fetchRss — error handling', () => {
   it('throws on non-ok HTTP response', async () => {
+    // Use 400 (non-retryable) so fetchWithTimeout throws immediately without the 1s retry delay.
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({ ok: false, status: 503 }),
+      vi.fn().mockResolvedValue({ ok: false, status: 400, headers: { get: () => null } }),
     );
     await expect(fetchRss('https://example.com/rss', 10)).rejects.toThrow(
-      'HTTP 503',
+      'HTTP 400',
     );
   });
 

@@ -4,6 +4,7 @@ import { getLastRun, getTopFailingSources } from './api/health';
 import { getRecentRuns, getRunErrors } from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
+import { runIngest } from './cron/ingest';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -23,7 +24,7 @@ function err(status: number, code: string, message: string, details: Record<stri
 export async function route(
   request: Request,
   env: Env,
-  _ctx: ExecutionContext,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -66,6 +67,15 @@ export async function route(
         if (!runId) return err(400, 'invalid_request', 'run_id query param required');
         const errors = await getRunErrors(env.DB, runId);
         return json({ ok: true, data: { errors } });
+      }
+
+      // POST /api/v1/admin/cron/trigger — fire runIngest outside cron schedule
+      if (request.method === 'POST' && pathname === '/api/v1/admin/cron/trigger') {
+        if (env.CRON_ENABLED !== 'true') {
+          return json({ ok: false, error: { code: 'cron_disabled', message: 'CRON_ENABLED is not true' } }, 400);
+        }
+        ctx.waitUntil(runIngest(env));
+        return json({ ok: true, message: 'Cron run triggered. Check /api/v1/admin/runs in ~15s.' });
       }
     }
 

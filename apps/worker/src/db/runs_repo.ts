@@ -32,8 +32,12 @@ export async function finishRun(
   const finishedAt = new Date().toISOString();
   const durationMs = Date.now() - startedAtMs;
 
+  // success only when no source failures AND no summary/fb errors
+  // errorsTotal includes sourcesFailed, so errorsTotal > sourcesFailed means non-source errors
+  const hasSourceFailure = counters.sourcesFailed > 0;
+  const hasNonSourceError = counters.errorsTotal > counters.sourcesFailed;
   const status =
-    counters.sourcesFailed === 0
+    !hasSourceFailure && !hasNonSourceError
       ? 'success'
       : counters.sourcesOk > 0
         ? 'partial_failure'

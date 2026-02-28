@@ -36,7 +36,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   } as Env;
 }
 
-const ctx = {} as ExecutionContext;
+const ctx = { waitUntil: (p: Promise<unknown>) => void p.catch(() => {}) } as unknown as ExecutionContext;
 
 function get(path: string, env: Env) {
   return route(new Request(`http://local${path}`, { method: 'GET' }), env, ctx);
@@ -127,6 +127,44 @@ describe('GET /api/v1/admin/errors', () => {
     const body = (await res.json()) as { ok: boolean; data: { errors: unknown[] } };
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.data.errors)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/admin/cron/trigger
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/admin/cron/trigger', () => {
+  function post(path: string, env: Env) {
+    return route(new Request(`http://local${path}`, { method: 'POST' }), env, ctx);
+  }
+
+  it('returns 403 when ADMIN_ENABLED is not "true"', async () => {
+    const res = await post('/api/v1/admin/cron/trigger', makeEnv({ ADMIN_ENABLED: 'false' }));
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe('forbidden');
+  });
+
+  it('returns 400 when CRON_ENABLED is not "true"', async () => {
+    const res = await post(
+      '/api/v1/admin/cron/trigger',
+      makeEnv({ ADMIN_ENABLED: 'true', CRON_ENABLED: 'false' }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe('cron_disabled');
+  });
+
+  it('returns 200 and triggers run when both flags enabled', async () => {
+    const res = await post(
+      '/api/v1/admin/cron/trigger',
+      makeEnv({ ADMIN_ENABLED: 'true', CRON_ENABLED: 'true' }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; message: string };
+    expect(body.ok).toBe(true);
+    expect(typeof body.message).toBe('string');
   });
 });
 
