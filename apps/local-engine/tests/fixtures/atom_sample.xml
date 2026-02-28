@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Sample Atom Feed</title>
+  <link href="https://example.com/feed" rel="self"/>
+  <updated>2026-02-28T10:00:00Z</updated>
+  <entry>
+    <title>כותרת ראשונה בעברית</title>
+    <link href="https://example.com/article/1?ref=atom"/>
+    <id>https://example.com/article/1</id>
+    <published>2026-02-28T09:00:00Z</published>
+    <summary>תוכן קצר של הכתבה הראשונה</summary>
+  </entry>
+  <entry>
+    <title>Second Article Title</title>
+    <link href="https://example.com/article/2"/>
+    <id>https://example.com/article/2</id>
+    <updated>2026-02-28T08:00:00Z</updated>
+    <summary>Short content of second article</summary>
+  </entry>
+</feed>
