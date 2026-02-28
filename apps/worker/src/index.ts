@@ -30,6 +30,9 @@ export interface Env {
   // Admin security — set via `wrangler secret put ADMIN_SECRET_TOKEN`
   // If set, all /api/v1/admin/* routes require `x-admin-token: <value>` header.
   ADMIN_SECRET_TOKEN?: string;
+  // Sync secret — set via `wrangler secret put CF_SYNC_TOKEN`
+  // Required for POST /api/v1/sync/stories from the local engine.
+  CF_SYNC_TOKEN?: string;
 }
 
 const handler: ExportedHandler<Env> = {

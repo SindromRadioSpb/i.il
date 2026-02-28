@@ -36,7 +36,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
   )}
 
   {stories.length > 0 && (
-    <div id="feed">
+    <div id="feed" data-latest={stories[0]?.last_update_at ?? ''}>
       {stories.map((s) => (
         <StoryCard
           storyId={s.story_id}
@@ -112,6 +112,22 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
           </a>
         </article>`;
     }
+
+    // Poll for new stories every 60 seconds and reload if newer content exists
+    (function startPolling() {
+      const latestTime = feed?.dataset.latest ?? '';
+      if (!latestTime) return;
+      setInterval(async () => {
+        try {
+          const res = await fetch(`${apiBase}/api/v1/feed?limit=1`);
+          if (!res.ok) return;
+          const data = await res.json() as { ok: boolean; data: { stories: { last_update_at: string }[] } };
+          if (data.ok && (data.data.stories[0]?.last_update_at ?? '') > latestTime) {
+            location.reload();
+          }
+        } catch { /* ignore — best-effort refresh */ }
+      }, 60_000);
+    })();
 
     btn?.addEventListener('click', async () => {
       if (!btn) return;

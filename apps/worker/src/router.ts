@@ -4,6 +4,7 @@ import { getLastRun, getTopFailingSources } from './api/health';
 import { getRecentRuns, getRunErrors, getDraftStories, getDraftCounts, holdStory, releaseStory } from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
+import { handleSync } from './api/sync';
 import { runIngest } from './cron/ingest';
 
 function json(data: unknown, status = 200): Response {
@@ -177,6 +178,11 @@ export async function route(
           corsOrigin,
         );
       }
+    }
+
+    // POST /api/v1/sync/stories — local engine pushes published stories to D1
+    if (request.method === 'POST' && pathname === '/api/v1/sync/stories') {
+      return handleSync(request, env);
     }
 
     // GET /api/v1/feed
