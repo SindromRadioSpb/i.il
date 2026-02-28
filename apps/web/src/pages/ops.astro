@@ -41,14 +41,17 @@ interface DraftStoryRow {
   title_sample: string | null;
 }
 
+interface DraftCounts { total: number; held: number; pending: number; }
+
 interface DraftsResponse {
   ok: boolean;
-  data: { drafts: DraftStoryRow[] };
+  data: { drafts: DraftStoryRow[]; counts: DraftCounts };
 }
 
 let health: HealthResponse | null = null;
 let runs: RunRow[] = [];
 let drafts: DraftStoryRow[] = [];
+let draftCounts: DraftCounts = { total: 0, held: 0, pending: 0 };
 
 try {
   const [hRes, rRes, dRes] = await Promise.all([
@@ -63,7 +66,7 @@ try {
   }
   if (dRes.ok) {
     const d = await dRes.json() as DraftsResponse;
-    if (d.ok) drafts = d.data.drafts;
+    if (d.ok) { drafts = d.data.drafts; draftCounts = d.data.counts; }
   }
 } catch {
   // API unreachable — show empty state
@@ -230,6 +233,25 @@ function fmtTime(iso: string): string {
 )}
 
 <h2>Draft stories</h2>
+
+<div class="grid" style="margin-bottom:0.75rem">
+  <div class="card">
+    <div class="card-label">Total drafts</div>
+    <div class="card-value">{draftCounts.total}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Pending (next runs)</div>
+    <div class="card-value" style="color:#3fb950">{draftCounts.pending}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">On hold (blocked)</div>
+    <div class="card-value" style={draftCounts.held > 0 ? 'color:#e3b341' : ''}>{draftCounts.held}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Published today cap</div>
+    <div class="card-value" style="color:#8b949e">5/run × 3 runs</div>
+  </div>
+</div>
 
 {drafts.length === 0 ? (
   <p class="notice">No draft stories pending review.</p>

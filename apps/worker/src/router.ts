@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@cloudflare/workers-types';
 import type { Env } from './index';
 import { getLastRun, getTopFailingSources } from './api/health';
-import { getRecentRuns, getRunErrors, getDraftStories, holdStory, releaseStory } from './api/admin';
+import { getRecentRuns, getRunErrors, getDraftStories, getDraftCounts, holdStory, releaseStory } from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
 import { runIngest } from './cron/ingest';
@@ -124,8 +124,11 @@ export async function route(
 
       // GET /api/v1/admin/drafts — draft stories pending editorial review
       if (request.method === 'GET' && pathname === '/api/v1/admin/drafts') {
-        const drafts = await getDraftStories(env.DB);
-        return adminJson({ ok: true, data: { drafts } }, 200, corsOrigin);
+        const [drafts, counts] = await Promise.all([
+          getDraftStories(env.DB),
+          getDraftCounts(env.DB),
+        ]);
+        return adminJson({ ok: true, data: { drafts, counts } }, 200, corsOrigin);
       }
 
       // POST /api/v1/admin/story/:id/hold — pause auto-publishing for a draft

@@ -65,6 +65,32 @@ export async function getRunErrors(db: D1Database, runId: string): Promise<Error
   }
 }
 
+export interface DraftCounts {
+  total: number;
+  held: number;
+  pending: number; // total - held
+}
+
+/** Real-time counts of draft stories by hold status. */
+export async function getDraftCounts(db: D1Database): Promise<DraftCounts> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(editorial_hold) AS held,
+                SUM(CASE WHEN editorial_hold = 0 THEN 1 ELSE 0 END) AS pending
+         FROM stories
+         WHERE state = 'draft'`,
+      )
+      .all<{ total: number; held: number | null; pending: number | null }>();
+    const row = result.results[0];
+    if (!row) return { total: 0, held: 0, pending: 0 };
+    return { total: row.total ?? 0, held: row.held ?? 0, pending: row.pending ?? 0 };
+  } catch {
+    return { total: 0, held: 0, pending: 0 };
+  }
+}
+
 /**
  * Fetch draft stories for editorial review, newest first.
  * Includes the founding item's Hebrew title as a preview.
