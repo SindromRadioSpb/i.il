@@ -72,16 +72,15 @@ export async function runIngest(env: Env): Promise<void> {
         await recordError(db, runId, 'ingest', source.id, null, err);
       }
     }
-    // Generate Russian summaries for draft stories (only when API key is set).
-    if (env.ANTHROPIC_API_KEY) {
-      try {
-        const summaryResult = await runSummaryPipeline(env, runId);
-        counters.publishedWeb += summaryResult.published;
-        counters.errorsTotal += summaryResult.failed;
-      } catch (err) {
-        counters.errorsTotal++;
-        await recordError(db, runId, 'summary', null, null, err);
-      }
+    // Generate Russian summaries for draft stories.
+    // buildChain() self-guards: returns empty chain when no API keys are configured.
+    try {
+      const summaryResult = await runSummaryPipeline(env, runId);
+      counters.publishedWeb += summaryResult.published;
+      counters.errorsTotal += summaryResult.failed;
+    } catch (err) {
+      counters.errorsTotal++;
+      await recordError(db, runId, 'summary', null, null, err);
     }
   } finally {
     await finishRun(db, runId, startedAtMs, counters);

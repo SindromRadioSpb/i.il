@@ -22,9 +22,10 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 GEMINI_MODEL = "gemini-2.0-flash"
 SUMMARY_PROVIDERS = "gemini,claude,rule_based"
 
-# Cron trigger (registered for both dev and production)
+# Cron trigger — 3×/day (05:00 / 11:00 / 18:00 UTC = 07/13/20 IST)
+# Matches Gemini free tier: 15 calls/day → 5 summaries × 3 runs
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["0 5,11,18 * * *"]
 
 # ── Production environment ────────────────────────────────────────────────────
 [env.production]
@@ -48,4 +49,4 @@ GEMINI_MODEL = "gemini-2.0-flash"
 SUMMARY_PROVIDERS = "gemini,claude,rule_based"
 
 [env.production.triggers]
-crons = ["*/10 * * * *"]
+crons = ["0 5,11,18 * * *"]

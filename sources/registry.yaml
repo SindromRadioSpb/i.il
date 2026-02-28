@@ -73,7 +73,7 @@ sources:
     type: rss
     url: https://storage.googleapis.com/mako-sitemaps/rssFlash.xml
     lang: he
-    enabled: true
+    enabled: false  # HTTP 404 — URL dead as of 2026-02-28
     throttle:
       min_interval_sec: 10
       max_items_per_run: 25
