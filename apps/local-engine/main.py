@@ -140,20 +140,36 @@ async def _phase_summary(
     counters: RunCounters,
     log,
     metrics: MetricsRecorder,
-    http_client: httpx.AsyncClient,
 ) -> None:
-    """Generate Russian summaries for draft stories via Ollama."""
+    """Generate Russian summaries for draft stories via Ollama.
+
+    Uses a dedicated httpx.AsyncClient with OLLAMA_TIMEOUT_SEC — NOT the shared
+    RSS client, which has a short 20s timeout unsuitable for LLM generation.
+    """
     t0 = time.monotonic()
     try:
-        sc = await run_summary_pipeline(
-            db,
-            ollama,
-            run_id,
-            max_summaries=settings.max_summaries_per_run,
-            target_min=settings.summary_target_min,
-            target_max=settings.summary_target_max,
-            http_client=http_client,
-        )
+        # Ollama needs its own client: generation can take 30–120 s per story.
+        async with httpx.AsyncClient(
+            timeout=float(settings.ollama_timeout_sec),
+            follow_redirects=False,
+        ) as ollama_http:
+            # Warmup: ensure the model is loaded into VRAM before the pipeline.
+            # After 5 min idle, Ollama unloads the model; first call takes ~40s.
+            try:
+                await ollama.chat("You are a warmup ping.", "Warmup.", client=ollama_http)
+                log.debug("ollama_warmed_up")
+            except Exception as warmup_exc:
+                log.warning("ollama_warmup_failed", error=str(warmup_exc) or type(warmup_exc).__name__)
+
+            sc = await run_summary_pipeline(
+                db,
+                ollama,
+                run_id,
+                max_summaries=settings.max_summaries_per_run,
+                target_min=settings.summary_target_min,
+                target_max=settings.summary_target_max,
+                http_client=ollama_http,
+            )
         counters.published_web += sc.published
         counters.errors_total += sc.failed
 
@@ -463,7 +479,7 @@ async def run_cycle(settings: Settings, sources: list[Source]) -> RunCounters:
             await _phase_ingest(db, sources, http, run_id, counters, log, metrics)
 
             # ── Phase 3: Summary ─────────────────────────────────────────────
-            await _phase_summary(db, settings, ollama, run_id, counters, log, metrics, http)
+            await _phase_summary(db, settings, ollama, run_id, counters, log, metrics)
 
             # ── Phase 4: Images ──────────────────────────────────────────────
             await _phase_images(db, settings, log, metrics, http)
@@ -661,11 +677,16 @@ def main() -> None:
 
     # ── --proof-fb: single proof cycle ───────────────────────────────────────
     if "--proof-fb" in args:
-        # Force FB posting + proof mode on for this run regardless of .env
+        # Force FB posting + proof mode on for this run regardless of .env.
+        # Set min_interval_sec=0 so multiple posts can succeed in one cycle
+        # (queue.py captures `now` once per batch; elapsed is always ~0 between
+        # consecutive posts unless the gap is disabled outright).
+        # Normal anti-spam limits (8/hr, 40/day) still apply in daemon mode.
         proof_settings = settings.model_copy(
             update={
                 "fb_posting_enabled": True,
                 "fb_proof_mode": True,
+                "fb_min_interval_sec": 0,
             }
         )
         log.info(

@@ -221,12 +221,18 @@ class PublishQueueManager:
         `_now` is injectable for deterministic tests.
         """
         counters = ProcessCounters()
-        now = _now or datetime.now(UTC)
-        now_iso = _iso(now)
+        batch_start = _now or datetime.now(UTC)
+        batch_start_iso = _iso(batch_start)
 
-        items = await get_pending_items(db, "fb", now_iso, limit=max_process)
+        items = await get_pending_items(db, "fb", batch_start_iso, limit=max_process)
 
         for i, item in enumerate(items):
+            # Refresh now each iteration so elapsed-time checks use actual wall
+            # clock rather than the batch-start snapshot.  Tests inject _now so
+            # they remain deterministic.
+            now = _now or datetime.now(UTC)
+            now_iso = _iso(now)
+
             # Re-fetch rate state each iteration (updated after each post)
             rate_state = await get_fb_rate_state(db)
             reason = check_rate(

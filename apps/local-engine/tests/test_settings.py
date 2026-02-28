@@ -9,7 +9,7 @@ from config.settings import Settings
 
 
 def test_defaults():
-    s = Settings()
+    s = Settings(_env_file=None)  # ignore local .env so we test pure defaults
     assert s.database_path == "data/news_hub.db"
     assert s.scheduler_interval_sec == 600
     assert s.scheduler_jitter_sec == 60
@@ -62,7 +62,7 @@ def test_safe_repr_redacts_secrets(monkeypatch):
 
 def test_safe_repr_empty_secrets_not_redacted():
     """Empty secrets should not be redacted (they're empty, not secret)."""
-    s = Settings()
+    s = Settings(_env_file=None)  # ignore local .env so tokens are empty
     safe = s.safe_repr()
     assert safe["fb_page_access_token"] == ""
     assert safe["cf_sync_token"] == ""

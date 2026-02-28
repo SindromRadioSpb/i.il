@@ -169,8 +169,9 @@ async def run_summary_pipeline(
             counters.published += 1
 
         except Exception as exc:
+            err_msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             await record_error(
-                db, run_id, "summary", None, story.story_id, str(exc)
+                db, run_id, "summary", None, story.story_id, err_msg
             )
             counters.failed += 1
 

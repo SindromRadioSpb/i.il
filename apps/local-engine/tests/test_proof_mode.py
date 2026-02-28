@@ -24,7 +24,7 @@ _NOW = "2026-02-28T10:00:00.000Z"
 
 
 def test_proof_mode_defaults():
-    s = Settings()
+    s = Settings(_env_file=None)  # ignore local .env so we test pure defaults
     assert s.fb_proof_mode is False
     assert s.fb_proof_max_posts_per_run == 3
     assert s.fb_proof_require_image is True
