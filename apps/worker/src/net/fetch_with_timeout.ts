@@ -58,6 +58,6 @@ export async function fetchWithTimeout(
       continue;
     }
 
-    return res; // caller checks res.ok and handles the error
+    throw new Error(`HTTP ${res.status} from ${typeof url === 'string' ? url : url.url}`);
   }
 }

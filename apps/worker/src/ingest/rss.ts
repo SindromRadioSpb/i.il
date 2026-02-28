@@ -122,10 +122,6 @@ export async function fetchRss(url: string, maxItems: number): Promise<Normalize
     { timeoutMs: 10_000, retries: 1 },
   );
 
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} fetching RSS from ${url}`);
-  }
-
   const text = await resp.text();
   const parsed = PARSER.parse(text) as XmlObj;
   const rawItems = extractItems(parsed).slice(0, maxItems);

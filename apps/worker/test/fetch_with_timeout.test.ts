@@ -52,39 +52,38 @@ describe('fetchWithTimeout', () => {
     expect(calls).toBe(2);
   });
 
-  it('returns non-ok response after retries exhausted', async () => {
+  it('throws after retries exhausted on 429', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: false, status: 429, headers: new Headers() }),
     );
-    const res = await fetchWithTimeout('https://example.com', undefined, {
-      retries: 1,
-      retryDelayMs: 0,
-    });
-    expect(res.ok).toBe(false);
-    expect(res.status).toBe(429);
+    await expect(
+      fetchWithTimeout('https://example.com', undefined, { retries: 1, retryDelayMs: 0 }),
+    ).rejects.toThrow('HTTP 429');
     // 1 initial + 1 retry = 2 calls
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
   });
 
-  it('does NOT retry on 400 (non-transient)', async () => {
+  it('throws immediately on 400 (non-transient, no retry)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: false, status: 400, headers: new Headers() }),
     );
-    const res = await fetchWithTimeout('https://example.com', undefined, { retries: 1 });
-    expect(res.status).toBe(400);
+    await expect(
+      fetchWithTimeout('https://example.com', undefined, { retries: 1 }),
+    ).rejects.toThrow('HTTP 400');
     // Only 1 call — no retry for 400
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
-  it('does NOT retry on 404', async () => {
+  it('throws immediately on 404', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: false, status: 404, headers: new Headers() }),
     );
-    const res = await fetchWithTimeout('https://example.com', undefined, { retries: 1 });
-    expect(res.status).toBe(404);
+    await expect(
+      fetchWithTimeout('https://example.com', undefined, { retries: 1 }),
+    ).rejects.toThrow('HTTP 404');
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
