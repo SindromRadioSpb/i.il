@@ -20,7 +20,7 @@ SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 GEMINI_MODEL = "gemini-2.0-flash"
-SUMMARY_PROVIDERS = "gemini,claude,rule_based"
+SUMMARY_PROVIDERS = "gemini,claude,google_translate,rule_based"
 
 # Cron trigger — 3×/day (05:00 / 11:00 / 18:00 UTC = 07/13/20 IST)
 # Matches Gemini free tier: 15 calls/day → 5 summaries × 3 runs
@@ -46,7 +46,7 @@ SUMMARY_TARGET_MIN = "400"
 SUMMARY_TARGET_MAX = "700"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 GEMINI_MODEL = "gemini-2.0-flash"
-SUMMARY_PROVIDERS = "gemini,claude,rule_based"
+SUMMARY_PROVIDERS = "gemini,claude,google_translate,rule_based"
 
 [env.production.triggers]
 crons = ["0 5,11,18 * * *"]

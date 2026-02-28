@@ -108,18 +108,23 @@ describe('buildChain', () => {
     expect(buildChain(env).length).toBe(1);
   });
 
-  it('uses default order when SUMMARY_PROVIDERS is not set', () => {
-    // No keys → only rule_based from default order gemini,claude,rule_based
-    const env = {} as Env;
-    expect(buildChain(env).length).toBe(1); // rule_based only
+  it('always includes google_translate regardless of keys', () => {
+    const env = { SUMMARY_PROVIDERS: 'google_translate' } as unknown as Env;
+    expect(buildChain(env).length).toBe(1);
   });
 
-  it('includes all three when all keys are set', () => {
+  it('uses default order when SUMMARY_PROVIDERS is not set', () => {
+    // No keys → google_translate + rule_based from default gemini,claude,google_translate,rule_based
+    const env = {} as Env;
+    expect(buildChain(env).length).toBe(2); // google_translate + rule_based
+  });
+
+  it('includes all four when all keys are set', () => {
     const env = {
       GEMINI_API_KEY: 'g-key',
       ANTHROPIC_API_KEY: 'a-key',
-      SUMMARY_PROVIDERS: 'gemini,claude,rule_based',
+      SUMMARY_PROVIDERS: 'gemini,claude,google_translate,rule_based',
     } as unknown as Env;
-    expect(buildChain(env).length).toBe(3);
+    expect(buildChain(env).length).toBe(4);
   });
 });

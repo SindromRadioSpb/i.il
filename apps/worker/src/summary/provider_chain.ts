@@ -10,6 +10,7 @@ import type { Env } from '../index';
 import type { SummaryItem, SummaryProvider } from './provider';
 import { GeminiProvider } from './providers/gemini';
 import { ClaudeProvider } from './providers/claude';
+import { GoogleTranslateProvider } from './providers/google_translate';
 import { RuleBasedProvider } from './providers/rule_based';
 
 export interface ChainResult {
@@ -44,7 +45,7 @@ export class ProviderChain {
   }
 }
 
-const DEFAULT_ORDER = 'gemini,claude,rule_based';
+const DEFAULT_ORDER = 'gemini,claude,google_translate,rule_based';
 
 /**
  * Build a ProviderChain from the environment.
@@ -66,6 +67,9 @@ export function buildChain(env: Env): ProviderChain {
         break;
       case 'claude':
         if (env.ANTHROPIC_API_KEY) providers.push(new ClaudeProvider());
+        break;
+      case 'google_translate':
+        providers.push(new GoogleTranslateProvider());
         break;
       case 'rule_based':
         providers.push(new RuleBasedProvider());

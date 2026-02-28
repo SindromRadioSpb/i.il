@@ -81,10 +81,11 @@ export async function runSummaryPipeline(env: Env, runId: string): Promise<Summa
       const body = formatBody(parsed);
       const fullText = formatFull(parsed);
 
-      // Guards (rule_based provider may produce short bodies — allow it through)
-      const isRuleBased = providerName === 'rule_based';
+      // Guards — low-fidelity providers (no LLM) may produce short bodies; allow through
+      const isLowFidelity =
+        providerName === 'rule_based' || providerName === 'google_translate';
       const guardResults = [
-        isRuleBased ? { ok: true } : guardLength(body, targetMin, targetMax),
+        isLowFidelity ? { ok: true } : guardLength(body, targetMin, targetMax),
         guardForbiddenWords(fullText),
         guardNumbers(items.map(i => i.titleHe), fullText),
         guardHighRisk(body, story.riskLevel),
