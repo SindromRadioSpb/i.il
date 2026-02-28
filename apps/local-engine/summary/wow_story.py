@@ -250,6 +250,8 @@ def _sanitize_post(text: str, facts: ExtractedFacts) -> str:
     text = _HASHTAG_LINE_RE.sub("", text)
     # 2. Remove inline # markers (keep the word)
     text = _HASHTAG_RE.sub(lambda m: m.group(0)[1:], text)
+    # 3a. Remove example-delimiter lines (--- or ═══ or ___) that LLM copies from prompt
+    text = re.sub(r"(?m)^[-=_]{3,}\s*$", "", text)
     # 3. Remove section-header lines
     lines = text.splitlines()
     cleaned_lines = []

@@ -116,6 +116,10 @@ async def fetch_rss(
         if not link:
             continue
 
+        # Apply source-level URL exclusion patterns
+        if any(pat in link for pat in source.exclude_url_patterns):
+            continue
+
         # Extract title
         title_raw = getattr(raw, "title", "") or ""
         title = strip_html(title_raw)

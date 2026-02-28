@@ -56,6 +56,7 @@ sources:
       min_interval_sec: 15
       max_items_per_run: 20
     category_hints: [politics, security, economy, society, culture, sport]
+    exclude_url_patterns: ["/horoscopes/"]
 
   - id: mako_news
     name: mako חדשות (RSS)

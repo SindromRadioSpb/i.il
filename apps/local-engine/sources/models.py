@@ -20,6 +20,7 @@ class Source(BaseModel):
     throttle: Throttle = Throttle()
     category_hints: list[str] = []
     parser: dict[str, object] | None = None
+    exclude_url_patterns: list[str] = []
 
     @field_validator("type")
     @classmethod
