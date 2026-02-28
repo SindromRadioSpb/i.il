@@ -19,6 +19,8 @@ from summary.fact_extract import ExtractedFacts
 from summary.ollama import OllamaClient
 from summary.wow_story import (
     WowCounters,
+    _classify_guard_failures,
+    _sanitize_post,
     compose_wow_post,
     guard_wow_ends_with_url,
     guard_wow_forbidden_words,
@@ -316,40 +318,49 @@ async def test_compose_wow_post_happy_path():
     assert "цахал" not in caption  # would be uppercased by glossary if present
 
 
-async def test_compose_wow_post_rewrite_fixes_hashtag():
-    """Draft has hashtags, critic rewrites to remove them."""
+async def test_compose_wow_post_sanitizes_hashtags_without_rewrite():
+    """Hashtags are stripped programmatically — no critic rewrite needed."""
     draft_with_hashtag = (
         "Землетрясение 4.5 в Тель-Авиве: что происходит?\n\n"
         "Ранним утром в районе Тель-Авива произошло землетрясение магнитудой 4.5 по шкале Рихтера. "
         "Эпицентр находился в 10 км к западу от центра города на глубине 15 км. "
-        "Жертв и серьёзных разрушений, по имеющимся данным, нет, здания устояли. "
-        "Сейсмологи продолжают наблюдения за обстановкой в течение ближайших суток.\n\n"
+        "Жертв и серьёзных разрушений нет, здания устояли. "
+        "Однако сейсмологи продолжают наблюдения за обстановкой в течение ближайших суток.\n\n"
         "Ощущали ли вы землетрясение сегодня утром?\n\n"
         f"#Израиль #землетрясение\n\nПодробнее → {_URL}"
     )
-    ollama = _make_ollama([draft_with_hashtag, _VALID_POST])
+    # Only 1 response needed — _sanitize_post strips hashtags, no rewrite triggered
+    ollama = _make_ollama([draft_with_hashtag])
 
     caption, counters = await compose_wow_post(ollama, _VALID_FACTS)
 
     assert caption is not None
-    assert counters.rewrite_attempts == 1
+    assert counters.rewrite_attempts == 0  # sanitized programmatically, no critic call
     assert counters.caption_ok == 1
     assert "#" not in caption
 
 
 async def test_compose_wow_post_returns_none_after_max_rewrites():
-    """All rewrite attempts fail — returns None."""
-    bad_post = "Короткий пост."  # fails length and URL guards
-    bad_rewrite = "Ещё короче."
-    # draft + 2 rewrites = 3 responses
-    ollama = _make_ollama([bad_post, bad_rewrite, bad_rewrite])
+    """Returns None only when a HARD guard fails after all rewrites."""
+    # Post with forbidden word "ужас" — HARD guard, never softened
+    forbidden_post = (
+        "Настоящий ужас: землетрясение в Тель-Авиве\n\n"
+        "Ранним утром в районе Тель-Авива произошёл настоящий ужас — землетрясение магнитудой 4.5. "
+        "Эпицентр находился в 10 км к западу от центра города на глубине 15 км. "
+        "Жертв нет, но жители напуганы. "
+        "Однако спасатели уже работают на месте событий. "
+        "Как вы себя чувствуете?\n\n"
+        f"Подробнее → {_URL}"
+    )
+    # draft + 2 rewrites all contain "ужас" (HARD guard never fixed)
+    ollama = _make_ollama([forbidden_post, forbidden_post, forbidden_post])
 
     caption, counters = await compose_wow_post(ollama, _VALID_FACTS, max_rewrites=2)
 
     assert caption is None
     assert counters.caption_fail == 1
     assert counters.rewrite_attempts == 2
-    assert len(counters.guard_fail_reasons) > 0
+    assert any("ужас" in r for r in counters.guard_fail_reasons)
 
 
 async def test_compose_wow_post_draft_ollama_error_returns_none():
@@ -373,3 +384,76 @@ async def test_compose_wow_post_glossary_applied():
     # Glossary should have uppercased it (if present in draft)
     if caption and "цахал" in draft_with_bad_casing.lower():
         assert "ЦАХАЛ" in caption or "цахал" not in caption.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _sanitize_post — programmatic post-processing
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_sanitize_post_strips_hashtag_only_lines():
+    """Lines that consist entirely of hashtags are removed."""
+    text = (
+        "Землетрясение в Тель-Авиве\n\n"
+        "Произошло землетрясение.\n\n"
+        "#Израиль #землетрясение #ТельАвив"
+    )
+    result = _sanitize_post(text, _VALID_FACTS)
+    assert "#" not in result
+
+
+def test_sanitize_post_strips_inline_hashtags():
+    """Inline #Word markers are stripped but the word is kept."""
+    text = "Текст о #Израиле и #землетрясении в городе."
+    result = _sanitize_post(text, _VALID_FACTS)
+    assert "#" not in result
+    assert "Израиле" in result
+    assert "землетрясении" in result
+
+
+def test_sanitize_post_strips_section_headers():
+    """Section-header lines are removed entirely."""
+    text = (
+        "Заголовок: Землетрясение\n\n"
+        "Что произошло: Случилось нечто важное.\n\n"
+        "Источники: Ynet, Mako"
+    )
+    result = _sanitize_post(text, _VALID_FACTS)
+    assert "Что произошло:" not in result
+    assert "Источники:" not in result
+    # "Заголовок:" prefix stripped from first line, but content kept
+    assert "Землетрясение" in result
+    assert not result.startswith("Заголовок:")
+
+
+def test_sanitize_post_appends_url():
+    """story_url is always appended as 'Подробнее → <url>'."""
+    text = "Заголовок\n\nКакой-то текст о событии."
+    result = _sanitize_post(text, _VALID_FACTS)
+    assert f"Подробнее → {_URL}" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Soft-failure best-effort publish
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_compose_wow_post_publishes_with_soft_failures():
+    """Caption is published (caption_ok=1) even when only SOFT guards fail."""
+    # Short post — fails guard_wow_length (SOFT), no HARD guard failures
+    short_post = (
+        "Землетрясение в Тель-Авиве\n\n"
+        "Произошло небольшое землетрясение.\n\n"
+        "Как вы себя чувствуете?"
+    )
+    # Only 1 response — function returns immediately on first iteration (no hard fails)
+    ollama = _make_ollama([short_post])
+
+    caption, counters = await compose_wow_post(ollama, _VALID_FACTS)
+
+    # Publishes even though length guard is soft-failed
+    assert caption is not None
+    assert counters.caption_ok == 1
+    assert counters.caption_fail == 0
+    # URL was appended by _sanitize_post
+    assert f"Подробнее → {_URL}" in caption

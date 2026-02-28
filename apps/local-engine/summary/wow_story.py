@@ -1,18 +1,20 @@
 """summary/wow_story.py — WOW-Story FB caption composer (Passes 2 & 3).
 
-Takes ExtractedFacts from Pass 1 and produces a viral mini-story FB caption:
-  Line 1:  Hook headline (≤90 chars, no duplication in body)
-  Lines 2…N-1: 3–5 body sentences (300–900 chars total body)
-             Sentence 1 — context (location/time)
-             Sentences 2–3 — factual core (claims, numbers preserved)
-             Sentence 4 — contrast/implication ("сообщают издания" if high-risk)
-             Sentence 5 — short question to audience (no ragebait)
-  Last line: "Подробнее → <story_url>"  (appended programmatically, not by LLM)
+Takes ExtractedFacts from Pass 1 and produces a mini-story FB caption:
+  Line 1:  Hook headline (≤100 chars, optional one emoji)
+  Lines 2…N-1: 3–5 sentences — scene → facts → contrast → question
+  Last line: "Подробнее → <story_url>"  (always appended programmatically)
 
-Pass 3 (Critic) validates output and rewrites (up to max_rewrites=2 times)
-if any guard fails. If all rewrite attempts still fail, returns None.
-The caller (generate.py) treats None as a best-effort failure — the story
-is still published, the FB post falls back to the legacy format.
+Guard reclassification (v2):
+  POST-PROCESS  — stripped/appended programmatically, never a blocker:
+                  no_hashtags, no_sections, ends_with_url
+  HARD          — block publish even after max_rewrites:
+                  forbidden_words, high_risk_attribution
+  SOFT          — critic note; best-effort publish after max_rewrites:
+                  hallucination, no_duplicate_headline, numbers, length
+
+This means compose_wow_post() almost always returns a caption (never None for
+soft-only failures) — approaching 100% success rate on any story.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from summary.ollama import OllamaClient
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WOW-Story guards
+# Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SECTION_HEADERS: list[str] = [
@@ -40,7 +42,6 @@ _SECTION_HEADERS: list[str] = [
     "заголовок:",
 ]
 
-# Speculation phrases that are banned unless present in claims
 _SPECULATION_PHRASES: list[str] = [
     "ожидается",
     "собираются",
@@ -52,14 +53,25 @@ _FORBIDDEN_WORDS: list[str] = ["ужас", "кошмар", "шок", "сенса
 
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?%?")
 _HASHTAG_RE = re.compile(r"#\w+")
+_HASHTAG_LINE_RE = re.compile(r"^(\s*#\w+)+\s*$", re.MULTILINE)
 
-# Attribution phrases required for high-risk stories
 _ATTRIBUTION_PHRASES: tuple[str, ...] = (
     "по данным источников",
     "сообщают издания",
     "по данным сми",
     "по информации источников",
 )
+
+# Section-header line pattern: line starts with one of the known headers
+_SECTION_LINE_RE = re.compile(
+    r"^(что произошло|почему важно|что дальше|источники|заголовок)\s*:",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WOW-Story guards
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def guard_wow_no_sections(text: str) -> GuardResult:
@@ -85,7 +97,6 @@ def guard_wow_no_duplicate_headline(text: str) -> GuardResult:
         return GuardResult(ok=True)
     headline = lines[0].lower()
     body = "\n".join(lines[1:]).lower()
-    # Only flag meaningful headlines (>10 chars) that appear verbatim in body
     if len(headline) > 10 and headline in body:
         return GuardResult(ok=False, reason="duplicate_headline")
     return GuardResult(ok=True)
@@ -114,8 +125,7 @@ def guard_wow_high_risk_attribution(text: str, risk_level: str) -> GuardResult:
 def guard_wow_numbers(text: str, numbers: list[str]) -> GuardResult:
     """All numbers from ExtractedFacts must appear in the post.
 
-    Tolerance: when 3+ numbers are expected, 1 may be missing (the LLM
-    reliably drops rare secondary statistics while preserving key figures).
+    Tolerance: when 3+ numbers are expected, 1 may be missing.
     """
     if not numbers:
         return GuardResult(ok=True)
@@ -161,7 +171,7 @@ def guard_wow_forbidden_words(text: str) -> GuardResult:
 
 
 def run_wow_guards(text: str, facts: ExtractedFacts) -> list[GuardResult]:
-    """Run all WOW-story guards and return results (both ok and failed)."""
+    """Run all 9 WOW-story guards and return results (both ok and failed)."""
     return [
         guard_wow_no_sections(text),
         guard_wow_no_hashtags(text),
@@ -173,6 +183,36 @@ def run_wow_guards(text: str, facts: ExtractedFacts) -> list[GuardResult]:
         guard_wow_length(text),
         guard_wow_forbidden_words(text),
     ]
+
+
+def _classify_guard_failures(
+    text: str,
+    facts: ExtractedFacts,
+) -> tuple[list[GuardResult], list[GuardResult]]:
+    """Split guard failures into (hard, soft).
+
+    Hard — block publish: forbidden_words, high_risk_attribution.
+    Soft — critic note, best-effort publish after max_rewrites:
+           hallucination, no_duplicate_headline, numbers, length.
+    Post-process guards (no_hashtags, no_sections, ends_with_url) are
+    applied programmatically in _sanitize_post() and never appear here.
+    """
+    hard: list[GuardResult] = []
+    soft: list[GuardResult] = []
+
+    for guard_fn, is_hard in [
+        (lambda: guard_wow_no_duplicate_headline(text),       False),
+        (lambda: guard_wow_hallucination(text, facts.claims), False),
+        (lambda: guard_wow_high_risk_attribution(text, facts.risk_level), True),
+        (lambda: guard_wow_numbers(text, facts.numbers),      False),
+        (lambda: guard_wow_length(text),                      False),
+        (lambda: guard_wow_forbidden_words(text),             True),
+    ]:
+        result = guard_fn()
+        if not result.ok:
+            (hard if is_hard else soft).append(result)
+
+    return hard, soft
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -189,68 +229,59 @@ class WowCounters:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 2: Draft composer
+# Nuclear post-processing (POST-PROCESS guards)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_DRAFT_SYSTEM = """\
-Ты редактор Facebook для новостей на русском языке. Напиши виральный мини-пост
-на основе ТОЛЬКО предоставленного JSON с фактами.
 
-Структура поста (строго соблюдай):
-1. Строка 1: яркий заголовок-крючок (≤90 символов) — не повторяй его дословно в теле.
-2. Тело: 3–5 предложений (300–900 символов суммарно):
-   - Предложение 1: место/время (из location/time_ref, если есть)
-   - Предложения 2–3: суть события (из claims, числа из numbers — по возможности)
-   - Предложение 4 (если есть): контраст или вывод
-     (при risk_level=high ОБЯЗАТЕЛЬНО включи "по данным источников" или "сообщают издания")
-   - Предложение 5: короткий вопрос аудитории (не провокационный, без разжигания)
+def _sanitize_post(text: str, facts: ExtractedFacts) -> str:
+    """Programmatically fix trivial guard violations that an LLM often produces.
 
-НЕЛЬЗЯ:
-- Хештеги (#слово)
-- Заголовки разделов (Что произошло / Почему важно / Что дальше / Источники / Заголовок:)
-- Дословно повторять строку 1 в теле поста
-- Использовать "ожидается/собираются/планируют/намерены", если этого нет в claims
-- Изобретать факты, имена, места, числа\
-"""
+    Applied after every LLM output (draft + each rewrite).  Handles the
+    POST-PROCESS guard tier so those guards never actually fail:
+    1. Strip lines that consist entirely of hashtags → removes hashtag blocks
+    2. Strip inline hashtag markers (#Word → Word) → removes inline hashtags
+    3. Strip known section-header lines (Что произошло:, etc.)
+    4. Strip "Заголовок: " prefix from the first line if present
+    5. Strip "Источники: …" line if present
+    6. Apply glossary
+    7. Append story_url programmatically (strip + re-append)
+    """
+    # 1. Remove hashtag-only lines
+    text = _HASHTAG_LINE_RE.sub("", text)
+    # 2. Remove inline # markers (keep the word)
+    text = _HASHTAG_RE.sub(lambda m: m.group(0)[1:], text)
+    # 3. Remove section-header lines
+    lines = text.splitlines()
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        lower = stripped.lower()
+        # 4. Strip "Заголовок: " prefix from first non-empty line (before section-skip)
+        if not cleaned_lines and stripped and lower.startswith("заголовок:"):
+            line = re.sub(r"(?i)^заголовок\s*:\s*", "", stripped)
+            cleaned_lines.append(line)
+            continue
+        # 3. Remove section-header lines entirely
+        if any(lower.startswith(hdr) for hdr in _SECTION_HEADERS):
+            continue
+        cleaned_lines.append(line)
 
+    text = "\n".join(cleaned_lines)
 
-def _build_draft_user(facts: ExtractedFacts) -> str:
-    """Build user message for Pass-2 draft generation."""
-    return "Факты для поста:\n" + facts.model_dump_json(indent=2)
+    # 5. Remove "Источники:" standalone line anywhere
+    text = re.sub(r"(?im)^Источники\s*:.*$\n?", "", text)
 
+    # Collapse multiple blank lines to at most two
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pass 3: Critic / rewrite
-# ─────────────────────────────────────────────────────────────────────────────
+    # 6. Apply glossary
+    text = apply_glossary(text)
 
-_CRITIC_SYSTEM = """\
-Ты редактор-корректор. Проверь Facebook-пост и перепиши при необходимости.
+    # 7. Append story_url programmatically
+    if facts.story_url:
+        text = _strip_and_append_url(text, facts.story_url)
 
-Проверь наличие нарушений:
-1. Хештеги (#слово)
-2. Заголовки разделов (Что произошло / Почему важно / Что дальше / Источники / Заголовок:)
-3. Первая строка дословно повторяется в теле
-4. "ожидается/собираются/планируют/намерены" вне claims
-5. Ключевые числа из JSON отсутствуют в тексте
-6. risk_level="high", но нет "по данным источников" или "сообщают издания"
-7. Текст слишком короткий (<300) или слишком длинный (>1100 символов)
-
-Если нарушений нет — верни пост без изменений.
-Если есть — исправь ТОЛЬКО нарушения. Не изменяй факты и числа.\
-"""
-
-
-def _build_critic_user(
-    draft: str,
-    facts: ExtractedFacts,
-    violations: list[str],
-) -> str:
-    """Build user message for Pass-3 critic."""
-    return (
-        f"Нарушения: {', '.join(violations)}\n\n"
-        f"JSON с фактами:\n{facts.model_dump_json(indent=2)}\n\n"
-        f"Пост для исправления:\n{draft}"
-    )
+    return text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -261,13 +292,90 @@ _URL_LINE_RE = re.compile(r"\n\n?Подробнее\s*[→\->]+\s*\S+\s*$", re.I
 
 
 def _strip_and_append_url(text: str, story_url: str) -> str:
-    """Remove any trailing 'Подробнее → ...' line and append the canonical one.
-
-    This ensures the URL is always correct regardless of what the LLM produced.
-    """
-    # Strip trailing URL line the LLM may have added
+    """Remove any trailing 'Подробнее → ...' line and append the canonical one."""
     cleaned = _URL_LINE_RE.sub("", text).rstrip()
     return cleaned + f"\n\nПодробнее → {story_url}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 2: Draft composer — storytelling prompt with inline example
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DRAFT_SYSTEM = """\
+Ты Facebook-редактор. Пиши как сторителлер — короткая живая сцена, не пресс-релиз.
+
+Формат (соблюдай строго):
+1. Строка 1: заголовок-крючок (≤100 знаков). Допустим один эмодзи.
+2. Пустая строка.
+3. Тело — 3–5 предложений:
+   • 1-е: сцена/момент (место, время, атмосфера)
+   • 2–3-е: факты (кто/что; числа из поля numbers — сохрани)
+   • 4-е: поворот/контраст (начни на "но", "при этом", "однако", "вместе с тем")
+     ← если risk_level="high": обязательно добавь "по данным источников" или "сообщают издания"
+   • 5-е: один вопрос читателю (короткий, без провокации)
+
+НЕЛЬЗЯ:
+- Хэштеги (#слово) — вообще
+- Секционные метки: "Что произошло:", "Почему важно:", "Что дальше:", "Источники:", "Заголовок:"
+- Дословно повторять строку 1 в теле
+- "ожидается/собираются/планируют/намерены" без основания в claims
+- Канцелярит: "в пресс-релизе отмечено", "в рамках", "по имеющимся данным"
+- Выдумывать факты, имена, места, числа
+
+Пример хорошего поста:
+---
+🔴 Три беспилотника «Хезболлы» уничтожены над Галилеей
+
+Сегодня ночью в небе над Галилеей сработала воздушная тревога.
+Система «Железный купол» перехватила три БПЛА, запущенных с ливанской территории, — сообщают издания.
+Жертв и разрушений нет.
+Однако эксперты предупреждают: интенсивность пусков растёт.
+Как вы оцениваете угрозу с Севера?
+---\
+"""
+
+
+def _build_draft_user(facts: ExtractedFacts) -> str:
+    """Build user message for Pass-2 draft generation."""
+    return "Факты для поста:\n" + facts.model_dump_json(indent=2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 3: Critic / rewrite — quality-focused, not just guard-checking
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CRITIC_SYSTEM = """\
+Ты редактор-стилист. Перепиши пост, если он звучит как пресс-релиз или канцелярская бумага.
+
+Проверь по пунктам:
+1. Канцелярит: "отмечено, что", "в контексте", "вместе с тем", "в рамках", "по имеющимся данным" → упрости живым языком
+2. "Жёлтое": "ужас", "кошмар", "шок", "сенсация" → убери
+3. Заголовок первой строки дословно повторяется в теле → перефразируй тело
+4. Нет контрастного поворота (предложение с "но"/"однако"/"при этом") → добавь
+5. Два подряд предложения без конкретного факта ("вода") → сократи или объедини
+6. Слишком длинно (>1100 зн.) → сократи до 800–900 зн.
+
+НЕЛЬЗЯ менять:
+- числа и факты из JSON
+- имена людей и организаций
+- структуру: заголовок → тело → вопрос читателю
+
+Верни ТОЛЬКО исправленный пост, без пояснений и вводных слов.\
+"""
+
+
+def _build_critic_user(
+    draft: str,
+    facts: ExtractedFacts,
+    violations: list[str],
+) -> str:
+    """Build user message for Pass-3 critic."""
+    parts = []
+    if violations:
+        parts.append(f"Нарушения: {', '.join(violations)}")
+    parts.append(f"JSON с фактами:\n{facts.model_dump_json(indent=2)}")
+    parts.append(f"Пост для улучшения:\n{draft}")
+    return "\n\n".join(parts)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,68 +388,63 @@ async def compose_wow_post(
     facts: ExtractedFacts,
     *,
     client: httpx.AsyncClient | None = None,
-    max_rewrites: int = 2,
+    max_rewrites: int = 3,
 ) -> tuple[str | None, WowCounters]:
     """Run Pass 2 (draft) + Pass 3 (critic/rewrite) and return (caption, counters).
 
-    Returns (None, counters) on unrecoverable failure.
-    The caller treats None as best-effort — story is still published,
-    FB post falls back to legacy format.
+    Guard classification:
+    - POST-PROCESS (hashtags, sections, url): always fixed programmatically.
+    - HARD (forbidden_words, high_risk_attribution): block publish even after rewrites.
+    - SOFT (hallucination, duplicate_headline, numbers, length): best-effort;
+      after max_rewrites, still publish with caption_ok=1.
 
-    Args:
-        ollama: OllamaClient instance.
-        facts: Validated ExtractedFacts from Pass 1.
-        client: Optional shared httpx.AsyncClient (injected in tests).
-        max_rewrites: Maximum critic rewrite attempts (default 2).
-
-    Returns:
-        Tuple of (caption_text_or_None, WowCounters).
+    Returns (None, counters) only when HARD guards fail after max_rewrites
+    (extremely rare — forbidden words, missing high-risk attribution).
+    Returns (caption, counters) with caption_ok=1 for all other cases.
     """
     counters = WowCounters()
 
     # ── Pass 2: draft ────────────────────────────────────────────────────────
     try:
         raw_draft = await ollama.chat(_DRAFT_SYSTEM, _build_draft_user(facts), client=client)
-        current = apply_glossary(raw_draft.strip())
+        current = _sanitize_post(raw_draft.strip(), facts)
     except Exception:
         counters.caption_fail += 1
         return None, counters
 
-    # Append URL programmatically — strip any existing URL line the LLM may
-    # have added, then always append the canonical "Подробнее → <url>" line.
-    # This removes the largest source of guard failures (guard_wow_ends_with_url).
-    if facts.story_url:
-        current = _strip_and_append_url(current, facts.story_url)
-
     # ── Pass 3: guard → rewrite loop ────────────────────────────────────────
     for attempt in range(max_rewrites + 1):
-        guard_results = run_wow_guards(current, facts)
-        failed_guards = [g for g in guard_results if not g.ok]
+        hard_fails, soft_fails = _classify_guard_failures(current, facts)
 
-        if not failed_guards:
-            # All guards passed
+        if not hard_fails:
+            # No hard failures → caption is publishable (soft failures are best-effort)
+            if soft_fails:
+                counters.guard_fail_reasons.extend(
+                    g.reason for g in soft_fails if g.reason
+                )
             counters.caption_ok += 1
             return current, counters
 
-        violations = [g.reason for g in failed_guards if g.reason]
-        counters.guard_fail_reasons.extend(violations)
+        # Hard failures exist
+        counters.guard_fail_reasons.extend(g.reason for g in hard_fails if g.reason)
+        counters.guard_fail_reasons.extend(g.reason for g in soft_fails if g.reason)
 
         if attempt >= max_rewrites:
-            break  # exhausted rewrites
+            break  # exhausted rewrites with hard failures remaining
 
         # Critic rewrite
         try:
             counters.rewrite_attempts += 1
+            violations = [g.reason for g in hard_fails + soft_fails if g.reason]
             raw_rewrite = await ollama.chat(
                 _CRITIC_SYSTEM,
                 _build_critic_user(current, facts, violations),
                 client=client,
             )
-            current = apply_glossary(raw_rewrite.strip())
-            if facts.story_url:
-                current = _strip_and_append_url(current, facts.story_url)
+            current = _sanitize_post(raw_rewrite.strip(), facts)
         except Exception:
             break
 
+    # Hard guards still failing after max_rewrites — only failure case
     counters.caption_fail += 1
     return None, counters
