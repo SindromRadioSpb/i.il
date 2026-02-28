@@ -21,6 +21,8 @@ export async function getStoriesForFbPosting(
        JOIN stories s USING(story_id)
        WHERE p.web_status = 'published'
          AND p.fb_status = 'disabled'
+         AND s.title_ru IS NOT NULL
+         AND s.summary_ru IS NOT NULL
        ORDER BY s.last_update_at DESC
        LIMIT ?`,
     )
