@@ -11,6 +11,8 @@ Usage:
     python main.py            # one cycle, then exit
     python main.py --loop     # scheduler loop (SCHEDULER_INTERVAL_SEC interval)
     python main.py --once     # alias for single cycle
+    python main.py --proof-fb # proof run: post up to FB_PROOF_MAX_POSTS_PER_RUN stories, exit 0 if >=2 posted
+    python main.py --health   # check all dependencies and exit 0 if OK
 
 Press Ctrl+C to stop gracefully.
 """
@@ -258,22 +260,55 @@ async def _phase_images(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def _enqueue_new_fb_posts(db, queue_mgr: PublishQueueManager, log) -> int:
+async def _enqueue_new_fb_posts(
+    db,
+    queue_mgr: PublishQueueManager,
+    log,
+    *,
+    require_image: bool = False,
+    only_category: str = "",
+    limit: int = 0,
+) -> int:
     """Enqueue published stories with fb_status='disabled' into publish_queue.
 
     Marks each story's publication row as 'pending' after enqueuing so it
     won't be enqueued again on the next cycle.
+
+    Args:
+        require_image: If True, only enqueue stories that have a downloaded
+            image in images_cache.  Used by --proof-fb mode.
+        only_category: If non-empty, only enqueue stories with this category.
+            Used by --proof-fb mode.
+        limit: Maximum number of stories to enqueue. 0 = no limit.
     """
-    async with db.execute(
-        """
+    query = """
         SELECT s.story_id, s.summary_version
           FROM stories s
           JOIN publications p ON p.story_id = s.story_id
          WHERE s.state          = 'published'
            AND p.fb_status      = 'disabled'
            AND s.editorial_hold = 0
-        """
-    ) as cur:
+    """
+    params: list[object] = []
+
+    if only_category:
+        query += " AND s.category = ?"
+        params.append(only_category)
+
+    if require_image:
+        query += (
+            " AND EXISTS ("
+            "  SELECT 1 FROM images_cache ic"
+            "   WHERE ic.story_id = s.story_id"
+            "     AND ic.status   = 'downloaded'"
+            " )"
+        )
+
+    if limit > 0:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    async with db.execute(query, params) as cur:
         rows = await cur.fetchall()
 
     count = 0
@@ -300,7 +335,13 @@ async def _phase_fb(
     log,
     metrics: MetricsRecorder,
 ) -> None:
-    """Process FB publish queue: enqueue new stories, post pending items."""
+    """Process FB publish queue: enqueue new stories, post pending items.
+
+    In proof mode (settings.fb_proof_mode=True):
+      - Only enqueues stories with downloaded images (if fb_proof_require_image)
+      - Only enqueues stories matching fb_proof_only_category (if set)
+      - Processes at most fb_proof_max_posts_per_run items
+    """
     t0 = time.monotonic()
     try:
         fb_client = FacebookClient(
@@ -313,10 +354,21 @@ async def _phase_fb(
             min_interval_sec=settings.fb_min_interval_sec,
         )
 
-        await _enqueue_new_fb_posts(db, queue_mgr, log)
+        proof = settings.fb_proof_mode
+        await _enqueue_new_fb_posts(
+            db,
+            queue_mgr,
+            log,
+            require_image=proof and settings.fb_proof_require_image,
+            only_category=settings.fb_proof_only_category if proof else "",
+            limit=settings.fb_proof_max_posts_per_run if proof else 0,
+        )
 
+        max_process = settings.fb_proof_max_posts_per_run if proof else 50
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as fb_http:
-            fc = await queue_mgr.process_pending(db, fb_client, http_client=fb_http)
+            fc = await queue_mgr.process_pending(
+                db, fb_client, http_client=fb_http, max_process=max_process
+            )
 
         counters.published_fb += fc.posted
         counters.errors_total += fc.failed
@@ -328,6 +380,7 @@ async def _phase_fb(
             failed=fc.failed,
             rate_limited=fc.rate_limited,
             elapsed_ms=elapsed_ms,
+            proof_mode=proof,
         )
         await metrics.record(db, "fb", "posted", fc.posted)
         await metrics.record(db, "fb", "failed", fc.failed)
@@ -498,6 +551,90 @@ async def scheduler_loop(settings: Settings) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Health check
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def run_health_check(settings: Settings) -> bool:
+    """Check all dependencies. Prints a status table. Returns True if all pass."""
+    checks: list[tuple[str, bool, str]] = []
+
+    # 1. Database
+    try:
+        async with get_db(settings.database_path) as db:
+            await db.execute("SELECT 1")
+        checks.append(("DB", True, settings.database_path))
+    except Exception as exc:
+        checks.append(("DB", False, str(exc)))
+
+    # 2. Ollama
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(f"{settings.ollama_base_url}/api/tags")
+            r.raise_for_status()
+            models = r.json().get("models", [])
+        model_names = [m.get("name", "") for m in models]
+        model_found = any(settings.ollama_model in n for n in model_names)
+        detail = f"reachable, model {'found' if model_found else 'NOT FOUND: ' + settings.ollama_model}"
+        checks.append(("Ollama", True, detail))
+    except Exception as exc:
+        checks.append(("Ollama", False, f"unreachable: {exc}"))
+
+    # 3. Sources registry
+    try:
+        srcs = load_sources(settings.sources_registry_path)
+        enabled = get_enabled_sources(srcs)
+        checks.append(("Sources", True, f"{len(enabled)} enabled"))
+    except Exception as exc:
+        checks.append(("Sources", False, str(exc)))
+
+    # 4. Facebook credentials (presence only — not validated against API)
+    if settings.fb_posting_enabled or "--proof-fb" in sys.argv:
+        fb_creds_ok = bool(settings.fb_page_id and settings.fb_page_access_token)
+        if fb_creds_ok:
+            checks.append(("FB Token", True, f"page_id={settings.fb_page_id}, token present"))
+        else:
+            missing = []
+            if not settings.fb_page_id:
+                missing.append("FB_PAGE_ID")
+            if not settings.fb_page_access_token:
+                missing.append("FB_PAGE_ACCESS_TOKEN")
+            checks.append(("FB Token", False, f"missing: {', '.join(missing)}"))
+    else:
+        checks.append(("FB Token", True, "FB posting disabled — skipped"))
+
+    # 5. CF Sync endpoint (presence only)
+    if settings.cf_sync_enabled:
+        cf_ok = bool(settings.cf_sync_url and settings.cf_sync_token)
+        if cf_ok:
+            checks.append(("CF Sync", True, f"url configured, token present"))
+        else:
+            missing = []
+            if not settings.cf_sync_url:
+                missing.append("CF_SYNC_URL")
+            if not settings.cf_sync_token:
+                missing.append("CF_SYNC_TOKEN")
+            checks.append(("CF Sync", False, f"missing: {', '.join(missing)}"))
+    else:
+        checks.append(("CF Sync", True, "CF sync disabled — skipped"))
+
+    # Print table
+    all_ok = all(ok for _, ok, _ in checks)
+    print("\n=== Health Check ===")
+    for name, ok, detail in checks:
+        status = "OK  " if ok else "FAIL"
+        print(f"  [{status}] {name:<12} {detail}")
+    print("===================")
+    if all_ok:
+        print("All checks passed.\n")
+    else:
+        failed = [name for name, ok, _ in checks if not ok]
+        print(f"FAILED: {', '.join(failed)}\n")
+
+    return all_ok
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -507,7 +644,14 @@ def main() -> None:
     configure_logging(settings.log_level, settings.log_format, settings.log_file)
     log = get_logger("main")
 
-    # Ensure DB and migrations on every start
+    args = sys.argv[1:]
+
+    # ── --health: dependency check, no cycle ─────────────────────────────────
+    if "--health" in args:
+        all_ok = asyncio.run(run_health_check(settings))
+        sys.exit(0 if all_ok else 1)
+
+    # ── Initialise DB + migrations (all non-health modes) ─────────────────────
     async def _init_db():
         async with get_db(settings.database_path) as db:
             await apply_migrations(db)
@@ -515,15 +659,55 @@ def main() -> None:
     asyncio.run(_init_db())
     log.info("db_ready", path=settings.database_path)
 
-    loop_mode = "--loop" in sys.argv or "--daemon" in sys.argv
+    # ── --proof-fb: single proof cycle ───────────────────────────────────────
+    if "--proof-fb" in args:
+        # Force FB posting + proof mode on for this run regardless of .env
+        proof_settings = settings.model_copy(
+            update={
+                "fb_posting_enabled": True,
+                "fb_proof_mode": True,
+            }
+        )
+        log.info(
+            "starting_proof_mode",
+            max_posts=proof_settings.fb_proof_max_posts_per_run,
+            require_image=proof_settings.fb_proof_require_image,
+            only_category=proof_settings.fb_proof_only_category or "(any)",
+        )
+        srcs = load_sources(proof_settings.sources_registry_path)
+        enabled = get_enabled_sources(srcs)
+        log.info("sources_loaded", total=len(enabled))
+        counters = asyncio.run(run_cycle(proof_settings, enabled))
 
-    if loop_mode:
+        # Proof summary (no secrets)
+        print("\n=== PROOF RUN SUMMARY ===")
+        print(f"  Items new:      {counters.items_new}")
+        print(f"  Stories new:    {counters.stories_new}")
+        print(f"  Summaries pub:  {counters.published_web}")
+        print(f"  FB posts sent:  {counters.published_fb}")
+        print(f"  Errors:         {counters.errors_total}")
+        print("=========================")
+
+        needed = 2
+        if counters.published_fb >= needed:
+            print(f"PROOF PASSED: {counters.published_fb} FB posts sent successfully.\n")
+            sys.exit(0)
+        else:
+            print(
+                f"PROOF FAILED: only {counters.published_fb}/{needed} posts sent. "
+                "Check logs for details.\n"
+            )
+            sys.exit(1)
+
+    # ── --loop / --daemon: scheduler loop ────────────────────────────────────
+    if "--loop" in args or "--daemon" in args:
         log.info("starting_loop_mode")
         asyncio.run(scheduler_loop(settings))
     else:
+        # ── default / --once: single cycle ───────────────────────────────────
         log.info("starting_once_mode")
-        sources = load_sources(settings.sources_registry_path)
-        enabled = get_enabled_sources(sources)
+        srcs = load_sources(settings.sources_registry_path)
+        enabled = get_enabled_sources(srcs)
         log.info("sources_loaded", total=len(enabled))
         asyncio.run(run_cycle(settings, enabled))
 

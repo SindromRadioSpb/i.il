@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     fb_max_per_day: int = Field(default=40, ge=1)
     fb_min_interval_sec: int = Field(default=180, ge=0)
 
+    # --- Facebook Proof Mode (used with --proof-fb) ---
+    fb_proof_mode: bool = Field(default=False)
+    fb_proof_max_posts_per_run: int = Field(default=3, ge=1)
+    fb_proof_require_image: bool = Field(default=True)
+    fb_proof_only_category: str = Field(default="")
+
     # --- Image Cache ---
     image_cache_dir: str = Field(default="data/images")
     image_max_size_mb: int = Field(default=5, ge=1)
