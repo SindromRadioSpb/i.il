@@ -22,6 +22,8 @@ interface FbErrorResponse {
   error?: {
     code?: number;
     message?: string;
+    error_subcode?: number;
+    type?: string;
   };
 }
 
@@ -44,16 +46,19 @@ export async function postToFacebook(
 
   if (!res.ok) {
     let errCode: number | undefined;
+    let errMsg: string | undefined;
     try {
       const errBody = (await res.json()) as FbErrorResponse;
       errCode = errBody?.error?.code;
+      errMsg = errBody?.error?.message;
     } catch {
       // ignore parse errors
     }
-    throw Object.assign(new Error(`Facebook API ${res.status}`), {
-      httpStatus: res.status,
-      fbCode: errCode,
-    });
+    const detail = [errCode ? `code=${errCode}` : null, errMsg].filter(Boolean).join(' ');
+    throw Object.assign(
+      new Error(`Facebook API ${res.status}${detail ? `: ${detail}` : ''}`),
+      { httpStatus: res.status, fbCode: errCode },
+    );
   }
 
   const data = (await res.json()) as FbPostResult;
