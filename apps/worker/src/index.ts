@@ -25,6 +25,7 @@ export interface Env {
   PUBLIC_SITE_BASE_URL?: string;
   // Cron budget — max wall-clock ms per run (default: 25000)
   CRON_BUDGET_MS?: string;
+  SERVICE_ENV?: string;
 }
 
 const handler: ExportedHandler<Env> = {

@@ -40,7 +40,7 @@ export async function route(
         service: {
           name: 'news-hub',
           version: '0.1.0',
-          env: env.ADMIN_ENABLED === 'true' ? 'dev' : 'prod',
+          env: env.SERVICE_ENV ?? 'prod',
           now_utc: new Date().toISOString(),
         },
         last_run: lastRun,
