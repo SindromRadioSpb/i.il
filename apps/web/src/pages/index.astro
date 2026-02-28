@@ -1,28 +1,163 @@
 ---
-const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
+import Base from '../layouts/Base.astro';
+import StoryCard from '../components/StoryCard.astro';
+import { fetchFeed } from '../lib/api';
 
-let health: unknown = null;
+let stories: Awaited<ReturnType<typeof fetchFeed>>['data']['stories'] = [];
+let nextCursor: string | null = null;
+let apiError = false;
+
 try {
-  const res = await fetch(`${apiBase}/api/v1/health`);
-  if (res.ok) health = await res.json();
+  const resp = await fetchFeed(20);
+  if (resp.ok) {
+    stories = resp.data.stories;
+    nextCursor = resp.data.next_cursor;
+  }
 } catch {
-  // Worker unreachable during build — page renders without live data
+  apiError = true;
 }
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
 ---
 
-<html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <title>News Hub (HE→RU)</title>
-    <meta name="description" content="Русскоязычный хаб новостей из ивритоязычных источников." />
-    <link rel="canonical" href={import.meta.env.PUBLIC_SITE_BASE_URL ?? ''} />
-  </head>
-  <body>
-    <h1>News Hub (HE→RU)</h1>
-    {health
-      ? <p>Worker: <code>{JSON.stringify(health)}</code></p>
-      : <p>Worker недоступен во время билда — данные появятся после деплоя.</p>
+<Base
+  title="Новости Израиля на русском"
+  description="Автоматический пересказ новостей из израильских СМИ на русский язык. Ynet, Haaretz, Israel Hayom, Walla и другие источники."
+  canonicalPath="/"
+>
+  <h1 class="feed-title">Последние новости</h1>
+
+  {apiError && (
+    <p class="notice">Не удалось загрузить новости. Попробуйте позже.</p>
+  )}
+
+  {!apiError && stories.length === 0 && (
+    <p class="notice">Новости появятся после следующего обновления (3 раза в день).</p>
+  )}
+
+  {stories.length > 0 && (
+    <div id="feed">
+      {stories.map((s) => (
+        <StoryCard
+          storyId={s.story_id}
+          titleRu={s.title_ru}
+          excerptRu={s.summary_excerpt_ru}
+          category={s.category}
+          riskLevel={s.risk_level}
+          sourceCount={s.source_count}
+          lastUpdate={s.last_update_at}
+        />
+      ))}
+    </div>
+  )}
+
+  {nextCursor && (
+    <button
+      id="load-more"
+      class="btn-load-more"
+      data-cursor={nextCursor}
+      data-api={apiBase}
+    >
+      Загрузить ещё
+    </button>
+  )}
+
+  <script>
+    const btn = document.getElementById('load-more') as HTMLButtonElement | null;
+    const feed = document.getElementById('feed');
+
+    const CATEGORY_LABELS: Record<string, string> = {
+      politics: 'политика', security: 'безопасность', economy: 'экономика',
+      society: 'общество', tech: 'технологии', health: 'здоровье',
+      culture: 'культура', sport: 'спорт', weather: 'погода', other: 'другое',
+    };
+
+    function fmtTime(iso: string): string {
+      return new Date(iso).toLocaleDateString('ru-RU', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      });
     }
-    <p>Дальше здесь будет feed Stories.</p>
-  </body>
-</html>
+
+    function sourceWord(n: number): string {
+      if (n === 1) return 'источник';
+      if (n >= 2 && n <= 4) return 'источника';
+      return 'источников';
+    }
+
+    interface FeedStoryRaw {
+      story_id: string;
+      title_ru: string | null;
+      summary_excerpt_ru: string | null;
+      category: string;
+      risk_level: string;
+      source_count: number;
+      last_update_at: string;
+    }
+
+    function renderCard(s: FeedStoryRaw): string {
+      const title = s.title_ru ?? 'Новость обрабатывается…';
+      const cat = CATEGORY_LABELS[s.category] ?? s.category;
+      const excerpt = s.summary_excerpt_ru
+        ? `<p class="card__excerpt">${s.summary_excerpt_ru}</p>` : '';
+      return `
+        <article class="card">
+          <a href="/story/${s.story_id}" class="card__link">
+            <div class="card__meta">
+              <span class="badge badge--${s.risk_level}">${cat}</span>
+              <time datetime="${s.last_update_at}" class="card__time">${fmtTime(s.last_update_at)}</time>
+            </div>
+            <h2 class="card__title">${title}</h2>
+            ${excerpt}
+            <div class="card__footer">${s.source_count} ${sourceWord(s.source_count)}</div>
+          </a>
+        </article>`;
+    }
+
+    btn?.addEventListener('click', async () => {
+      if (!btn) return;
+      const cursor = btn.dataset.cursor;
+      const api = btn.dataset.api ?? '';
+      btn.disabled = true;
+      btn.textContent = 'Загружаем…';
+      try {
+        const url = `${api}/api/v1/feed?limit=20&cursor=${encodeURIComponent(cursor ?? '')}`;
+        const res = await fetch(url);
+        const json = await res.json() as { ok: boolean; data: { stories: FeedStoryRaw[]; next_cursor: string | null } };
+        if (json.ok && feed) {
+          for (const s of json.data.stories) {
+            feed.insertAdjacentHTML('beforeend', renderCard(s));
+          }
+          if (json.data.next_cursor) {
+            btn.dataset.cursor = json.data.next_cursor;
+            btn.disabled = false;
+            btn.textContent = 'Загрузить ещё';
+          } else {
+            btn.remove();
+          }
+        }
+      } catch {
+        btn.textContent = 'Ошибка загрузки';
+      }
+    });
+  </script>
+</Base>
+
+<style>
+  .feed-title { font-size: 1.4rem; margin-bottom: 1rem; font-weight: 700; }
+  .notice { color: var(--muted); font-size: 0.95rem; }
+  .btn-load-more {
+    display: block;
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.7rem 1rem;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-load-more:hover { background: #f0f4ff; }
+  .btn-load-more:disabled { color: var(--muted); cursor: default; }
+</style>

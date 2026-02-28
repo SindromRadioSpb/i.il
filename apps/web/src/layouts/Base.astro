@@ -1,0 +1,105 @@
+---
+interface Props {
+  title: string;
+  description: string;
+  canonicalPath?: string;
+}
+
+const { title, description, canonicalPath = '' } = Astro.props;
+const siteBase = import.meta.env.PUBLIC_SITE_BASE_URL ?? '';
+const canonical = `${siteBase}${canonicalPath}`;
+---
+
+<!DOCTYPE html>
+<html lang="ru" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <style is:global>
+      :root {
+        --bg: #fafafa;
+        --text: #1a1a1a;
+        --muted: #666;
+        --accent: #0055cc;
+        --border: #e0e0e0;
+        --card: #fff;
+        --risk-high: #c0392b;
+        --risk-medium: #e67e22;
+        --risk-low: #27ae60;
+        --width: 720px;
+      }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        font-size: 16px;
+      }
+      a { color: var(--accent); }
+      .site-header {
+        border-bottom: 1px solid var(--border);
+        padding: 0.875rem 1rem;
+      }
+      .site-header__inner {
+        max-width: var(--width);
+        margin: 0 auto;
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+      }
+      .site-logo {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .site-logo:hover { color: var(--accent); }
+      .site-tagline { font-size: 0.8rem; color: var(--muted); }
+      main {
+        max-width: var(--width);
+        margin: 0 auto;
+        padding: 1.25rem 1rem;
+      }
+      .site-footer {
+        max-width: var(--width);
+        margin: 2rem auto 0;
+        padding: 1rem;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+      @media (max-width: 640px) {
+        body { font-size: 15px; }
+        main { padding: 1rem 0.75rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a href="/" class="site-logo">Новости Израиля</a>
+        <span class="site-tagline">ивритские СМИ на русском</span>
+      </div>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>Автоматический пересказ новостей израильских СМИ на русский язык.</p>
+    </footer>
+  </body>
+</html>
