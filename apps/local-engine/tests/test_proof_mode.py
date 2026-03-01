@@ -66,8 +66,8 @@ async def _insert_story(db, story_id: str, category: str = "other") -> None:
     await db.execute(
         """
         INSERT INTO stories (story_id, start_at, last_update_at, state,
-                             editorial_hold, category, summary_version)
-        VALUES (?, ?, ?, 'published', 0, ?, 1)
+                             editorial_hold, category, summary_version, fb_caption)
+        VALUES (?, ?, ?, 'published', 0, ?, 1, 'WOW caption stub for tests.')
         """,
         (story_id, _NOW, _NOW, category),
     )

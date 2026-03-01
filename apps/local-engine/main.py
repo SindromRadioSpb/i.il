@@ -309,6 +309,7 @@ async def _enqueue_new_fb_posts(
          WHERE s.state          = 'published'
            AND p.fb_status      = 'disabled'
            AND s.editorial_hold = 0
+           AND s.fb_caption     IS NOT NULL
     """
     params: list[object] = []
 
@@ -572,6 +573,115 @@ async def scheduler_loop(settings: Settings) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Status dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def run_status(settings: Settings) -> None:
+    """Print a concise dashboard of the current pipeline state."""
+    async with get_db(settings.database_path) as db:
+        async with db.execute(
+            "SELECT state, COUNT(*) as n FROM stories GROUP BY state"
+        ) as cur:
+            story_rows = {r["state"]: r["n"] for r in await cur.fetchall()}
+
+        async with db.execute(
+            "SELECT fb_caption IS NOT NULL as has_wow, COUNT(*) as n"
+            " FROM stories WHERE state='published' GROUP BY has_wow"
+        ) as cur:
+            fmt_rows = {bool(r["has_wow"]): r["n"] for r in await cur.fetchall()}
+
+        async with db.execute(
+            "SELECT status, COUNT(*) as n FROM publish_queue GROUP BY status"
+        ) as cur:
+            queue_rows = {r["status"]: r["n"] for r in await cur.fetchall()}
+
+        async with db.execute(
+            "SELECT COUNT(*) as n FROM publish_queue"
+            " WHERE status='completed' AND date(completed_at) = date('now')"
+        ) as cur:
+            posted_today = (await cur.fetchone())["n"]
+
+        async with db.execute(
+            "SELECT COUNT(*) as n FROM stories WHERE state='published' AND cf_synced_at IS NULL"
+        ) as cur:
+            unsynced = (await cur.fetchone())["n"]
+
+        async with db.execute(
+            "SELECT COUNT(*) as n FROM stories WHERE cf_synced_at IS NOT NULL"
+        ) as cur:
+            synced = (await cur.fetchone())["n"]
+
+        async with db.execute(
+            "SELECT started_at, published_web, published_fb, errors_total"
+            " FROM runs ORDER BY started_at DESC LIMIT 1"
+        ) as cur:
+            last_run = await cur.fetchone()
+
+    draft = story_rows.get("draft", 0)
+    published = story_rows.get("published", 0)
+    wow = fmt_rows.get(True, 0)
+    legacy = fmt_rows.get(False, 0)
+    pending = queue_rows.get("pending", 0)
+    completed = queue_rows.get("completed", 0)
+
+    print("\n=== Pipeline Status ===")
+    print(f"  Stories :  {draft} draft  /  {published} published")
+    print(f"  Format  :  {wow} WOW  /  {legacy} legacy (no fb_caption)")
+    print(f"  FB Queue:  {pending} pending  /  {completed} done  /  {posted_today} posted today")
+    print(f"  CF Sync :  {synced} on site  /  {unsynced} waiting to sync")
+    if last_run:
+        ts = str(last_run["started_at"])[:19]
+        print(
+            f"  Last run:  {ts}  pub={last_run['published_web']}"
+            f"  fb={last_run['published_fb']}  errors={last_run['errors_total']}"
+        )
+    else:
+        print("  Last run:  none")
+    print("======================\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FB preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def run_preview_fb(settings: Settings, count: int = 3) -> None:
+    """Show the next N pending FB posts with full text — no publishing."""
+    async with get_db(settings.database_path) as db:
+        async with db.execute(
+            """
+            SELECT pq.story_id, pq.scheduled_at,
+                   s.title_ru, s.fb_caption, s.category
+              FROM publish_queue pq
+              JOIN stories s ON s.story_id = pq.story_id
+             WHERE pq.status = 'pending'
+             ORDER BY pq.priority DESC, pq.scheduled_at ASC
+             LIMIT ?
+            """,
+            (count,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        print("\nFB queue is empty — nothing to preview.\n")
+        return
+
+    print(f"\n=== FB Preview: next {len(rows)} post(s) [NOT published] ===")
+    for i, r in enumerate(rows, 1):
+        fmt = "WOW" if r["fb_caption"] else "LEGACY"
+        print(f"\n{'─'*50}")
+        print(f"  Post {i}  [{fmt}]  [{r['category']}]")
+        print(f"  Title: {r['title_ru']}")
+        print()
+        if r["fb_caption"]:
+            print(r["fb_caption"])
+        else:
+            print("  (no WOW caption — will fall back to legacy format)")
+    print(f"\n{'─'*50}\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Health check
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -671,6 +781,21 @@ def main() -> None:
     if "--health" in args:
         all_ok = asyncio.run(run_health_check(settings))
         sys.exit(0 if all_ok else 1)
+
+    # ── --status: pipeline dashboard, no cycle ────────────────────────────────
+    if "--status" in args:
+        asyncio.run(run_status(settings))
+        sys.exit(0)
+
+    # ── --preview-fb [N]: show next N FB posts without publishing ─────────────
+    if "--preview-fb" in args:
+        idx = args.index("--preview-fb")
+        try:
+            n = int(args[idx + 1])
+        except (IndexError, ValueError):
+            n = 3
+        asyncio.run(run_preview_fb(settings, n))
+        sys.exit(0)
 
     # ── Initialise DB + migrations (all non-health modes) ─────────────────────
     async def _init_db():
