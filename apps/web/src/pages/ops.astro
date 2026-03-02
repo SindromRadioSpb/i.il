@@ -417,7 +417,7 @@ function fmtTime(iso: string): string {
   <button class="btn btn-primary" id="trigger-cron-btn" data-i18n="triggerCron">▶ Запустить цикл</button>
 </div>
 
-<script define:vars={{ apiBase, adminToken, draftTotal: draftCounts.total }}>
+<script define:vars={{ apiBase, adminToken, draftTotal: draftCounts.total }} is:inline>
 
 // ── i18n ────────────────────────────────────────────────────────────────────
 const STRINGS = {

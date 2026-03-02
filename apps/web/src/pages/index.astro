@@ -117,9 +117,10 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8787';
     (function startPolling() {
       const latestTime = feed?.dataset.latest ?? '';
       if (!latestTime) return;
+      const pollApiBase = btn?.dataset.api ?? '';
       setInterval(async () => {
         try {
-          const res = await fetch(`${apiBase}/api/v1/feed?limit=1`);
+          const res = await fetch(`${pollApiBase}/api/v1/feed?limit=1`);
           if (!res.ok) return;
           const data = await res.json() as { ok: boolean; data: { stories: { last_update_at: string }[] } };
           if (data.ok && (data.data.stories[0]?.last_update_at ?? '') > latestTime) {
