@@ -155,3 +155,123 @@ export async function releaseStory(db: D1Database, storyId: string): Promise<boo
     .run();
   return ((result.meta as { changes?: number }).changes ?? 0) > 0;
 }
+
+/**
+ * Delete a single story by ID.
+ * CASCADE removes story_items and publications automatically.
+ * Returns true if a row was deleted.
+ */
+export async function deleteStory(db: D1Database, storyId: string): Promise<boolean> {
+  const result = await db
+    .prepare(`DELETE FROM stories WHERE story_id = ?`)
+    .bind(storyId)
+    .run();
+  return ((result.meta as { changes?: number }).changes ?? 0) > 0;
+}
+
+/**
+ * Delete ALL stories in draft state.
+ * Returns the number of deleted rows.
+ */
+export async function deleteAllDrafts(db: D1Database): Promise<number> {
+  const result = await db
+    .prepare(`DELETE FROM stories WHERE state = 'draft'`)
+    .run();
+  return (result.meta as { changes?: number }).changes ?? 0;
+}
+
+/**
+ * Set state = 'hidden' on a published story, removing it from the public feed.
+ * Returns true if a row was updated.
+ */
+export async function hideStory(db: D1Database, storyId: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE stories
+       SET state = 'hidden'
+       WHERE story_id = ? AND state = 'published'`,
+    )
+    .bind(storyId)
+    .run();
+  return ((result.meta as { changes?: number }).changes ?? 0) > 0;
+}
+
+/**
+ * Reset Facebook publication status so the story will be retried.
+ * Sets fb_status = 'pending', clears fb_attempts, fb_error_last, fb_post_id.
+ * Returns true if a publications row was updated.
+ */
+export async function resetFbStatus(db: D1Database, storyId: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE publications
+       SET fb_status = 'pending',
+           fb_attempts = 0,
+           fb_error_last = NULL,
+           fb_post_id = NULL,
+           fb_posted_at = NULL
+       WHERE story_id = ?`,
+    )
+    .bind(storyId)
+    .run();
+  return ((result.meta as { changes?: number }).changes ?? 0) > 0;
+}
+
+/**
+ * Purge run records (+ cascading error_events) older than `days` days.
+ * Returns the number of deleted run rows.
+ */
+export async function purgeOldRuns(db: D1Database, days: number): Promise<number> {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const result = await db
+    .prepare(`DELETE FROM runs WHERE started_at < ?`)
+    .bind(cutoff)
+    .run();
+  return (result.meta as { changes?: number }).changes ?? 0;
+}
+
+/**
+ * Purge error_events older than `days` days.
+ * Returns the number of deleted rows.
+ */
+export async function purgeOldErrors(db: D1Database, days: number): Promise<number> {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const result = await db
+    .prepare(`DELETE FROM error_events WHERE created_at < ?`)
+    .bind(cutoff)
+    .run();
+  return (result.meta as { changes?: number }).changes ?? 0;
+}
+
+/**
+ * Fetch published stories for admin review (newest first).
+ */
+export interface PublishedStoryRow {
+  story_id: string;
+  last_update_at: string;
+  title_ru: string | null;
+  category: string;
+  fb_status: string | null;
+  fb_post_id: string | null;
+  fb_attempts: number;
+}
+
+export async function getPublishedStories(db: D1Database, limit = 30): Promise<PublishedStoryRow[]> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT s.story_id, s.last_update_at, s.title_ru, s.category,
+                p.fb_status, p.fb_post_id, p.fb_attempts
+         FROM stories s
+         LEFT JOIN publications p ON p.story_id = s.story_id
+         WHERE s.state = 'published'
+         ORDER BY s.last_update_at DESC
+         LIMIT ?`,
+      )
+      .bind(limit)
+      .all<PublishedStoryRow>();
+    return result.results ?? [];
+  } catch {
+    return [];
+  }
+}

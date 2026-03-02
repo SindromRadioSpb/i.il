@@ -4,6 +4,21 @@
 
 ---
 
+## Команды
+
+Все команды запускаются из PowerShell в директории `J:\Project_Vibe\i.il\apps\local-engine`:
+
+| Команда | Описание |
+|---------|----------|
+| `python main.py` | Один цикл: парсинг → кластеризация → резюме → FB → CF sync |
+| `python main.py --loop` | Непрерывный режим (каждые 450 сек) |
+| `python main.py --status` | Мгновенный дашборд состояния (без запуска цикла) |
+| `python main.py --preview-fb` | Предпросмотр следующих 3 постов Facebook |
+| `python main.py --preview-fb 5` | Предпросмотр следующих N постов Facebook |
+| `python main.py --health` | Проверка доступности Ollama и конфигурации |
+
+---
+
 ## Требования
 
 | Компонент | Версия |
@@ -84,15 +99,15 @@ CF_SYNC_TOKEN=           # получить из wrangler secret
 ```bash
 cd J:/Project_Vibe/i.il/apps/local-engine
 python -m pytest tests/ -q
-# Ожидается: 323 passed
+# Ожидается: 408 passed
 ```
 
 ---
 
 ## Шаг 5 — Запустить один цикл
 
-```bash
-cd J:/Project_Vibe/i.il/apps/local-engine
+```powershell
+cd J:\Project_Vibe\i.il\apps\local-engine
 python main.py
 ```
 
@@ -162,12 +177,74 @@ python main.py
 
 ## Непрерывный режим (daemon)
 
-```bash
+```powershell
 python main.py --loop
 ```
 
-Запускает цикл каждые `SCHEDULER_INTERVAL_SEC` секунд (по умолчанию 600 = 10 минут).
+Запускает цикл каждые `SCHEDULER_INTERVAL_SEC` секунд (по умолчанию 450 = 7.5 минут).
 Остановить: **Ctrl+C** — движок дождётся завершения текущего цикла и выйдет.
+
+---
+
+## Дашборд состояния
+
+Мгновенный снимок состояния пайплайна — без запуска цикла:
+
+```powershell
+cd J:\Project_Vibe\i.il\apps\local-engine
+python main.py --status
+```
+
+Пример вывода:
+```
+=== Pipeline Status ===
+  Stories :  0 draft  /  9 published
+  Format  :  9 WOW  /  0 legacy (no fb_caption)
+  FB Queue:  2 pending  /  7 done  /  3 posted today
+  CF Sync :  9 on site  /  0 waiting to sync
+  Last run:  2026-03-01T14:32:00Z  pub=9  fb=3  errors=0
+```
+
+Поля:
+| Поле | Описание |
+|------|----------|
+| Stories | Черновики / опубликованные истории |
+| Format | WOW (fb_caption заполнен) vs legacy (старый формат, не постится) |
+| FB Queue | Очередь Facebook: pending / завершённые / отправлено сегодня |
+| CF Sync | Синхронизировано с Cloudflare / ждут синхронизации |
+| Last run | Время, число опубликованных, Facebook-постов и ошибок |
+
+---
+
+## Предпросмотр очереди Facebook
+
+Посмотреть следующие N постов без публикации:
+
+```powershell
+# Следующие 3 поста (по умолчанию)
+python main.py --preview-fb
+
+# Следующие 5 постов
+python main.py --preview-fb 5
+```
+
+Пример вывода:
+```
+=== FB Preview (next 3 pending posts) ===
+
+--- [1/3] story_id=abc123 ---
+🔴 Три беспилотника «Хезболлы» уничтожены над Галилеей
+
+Сегодня ночью в небе над Галилеей сработала воздушная тревога.
+Система «Железный купол» перехватила три БПЛА...
+
+https://www.ynet.co.il/news/...
+
+--- [2/3] story_id=def456 ---
+...
+```
+
+> Если в очереди нет постов — все истории либо уже опубликованы, либо не имеют `fb_caption`.
 
 ---
 

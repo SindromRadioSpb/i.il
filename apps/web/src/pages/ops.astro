@@ -27,10 +27,7 @@ interface HealthResponse {
   top_failing_sources: { source_id: string; error_count: number }[];
 }
 
-interface RunsResponse {
-  ok: boolean;
-  data: { runs: RunRow[] };
-}
+interface RunsResponse { ok: boolean; data: { runs: RunRow[] }; }
 
 interface DraftStoryRow {
   story_id: string;
@@ -42,32 +39,36 @@ interface DraftStoryRow {
 }
 
 interface DraftCounts { total: number; held: number; pending: number; }
+interface DraftsResponse { ok: boolean; data: { drafts: DraftStoryRow[]; counts: DraftCounts }; }
 
-interface DraftsResponse {
-  ok: boolean;
-  data: { drafts: DraftStoryRow[]; counts: DraftCounts };
+interface PublishedStoryRow {
+  story_id: string;
+  last_update_at: string;
+  title_ru: string | null;
+  category: string;
+  fb_status: string | null;
+  fb_post_id: string | null;
+  fb_attempts: number;
 }
+interface PublishedResponse { ok: boolean; data: { stories: PublishedStoryRow[] }; }
 
 let health: HealthResponse | null = null;
 let runs: RunRow[] = [];
 let drafts: DraftStoryRow[] = [];
 let draftCounts: DraftCounts = { total: 0, held: 0, pending: 0 };
+let published: PublishedStoryRow[] = [];
 
 try {
-  const [hRes, rRes, dRes] = await Promise.all([
+  const [hRes, rRes, dRes, pRes] = await Promise.all([
     fetch(`${apiBase}/api/v1/health`),
     fetch(`${apiBase}/api/v1/admin/runs`, { headers: adminHeaders }),
     fetch(`${apiBase}/api/v1/admin/drafts`, { headers: adminHeaders }),
+    fetch(`${apiBase}/api/v1/admin/published`, { headers: adminHeaders }),
   ]);
   if (hRes.ok) health = await hRes.json() as HealthResponse;
-  if (rRes.ok) {
-    const r = await rRes.json() as RunsResponse;
-    if (r.ok) runs = r.data.runs;
-  }
-  if (dRes.ok) {
-    const d = await dRes.json() as DraftsResponse;
-    if (d.ok) { drafts = d.data.drafts; draftCounts = d.data.counts; }
-  }
+  if (rRes.ok) { const r = await rRes.json() as RunsResponse; if (r.ok) runs = r.data.runs; }
+  if (dRes.ok) { const d = await dRes.json() as DraftsResponse; if (d.ok) { drafts = d.data.drafts; draftCounts = d.data.counts; } }
+  if (pRes.ok) { const p = await pRes.json() as PublishedResponse; if (p.ok) published = p.data.stories; }
 } catch {
   // API unreachable — show empty state
 }
@@ -76,7 +77,6 @@ function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
-
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleString('ru-RU', {
     month: 'short', day: 'numeric',
@@ -95,24 +95,69 @@ function fmtTime(iso: string): string {
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 13px;
            background: #0d1117; color: #c9d1d9; margin: 0; padding: 1.5rem; }
-    h1 { font-size: 1.1rem; color: #58a6ff; margin: 0 0 1.5rem; }
-    h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;
-         color: #8b949e; margin: 1.5rem 0 0.5rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+
+    /* ── Header ── */
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.5rem; }
+    h1 { font-size: 1.1rem; color: #58a6ff; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; align-items: center; }
+    .lang-toggle { display: flex; gap: 2px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; }
+    .lang-btn { padding: 3px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer;
+                border: none; background: transparent; color: #8b949e; font-family: inherit; }
+    .lang-btn.active { background: #1f6feb; color: #fff; }
+    .refresh-btn { padding: 3px 10px; font-size: 0.72rem; font-weight: 600; cursor: pointer;
+                   border: 1px solid #30363d; border-radius: 4px; background: #161b22;
+                   color: #8b949e; font-family: inherit; }
+    .refresh-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    /* ── Layout ── */
+    h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+         color: #8b949e; margin: 1.75rem 0 0.5rem; border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin: 1.75rem 0 0.5rem; border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; }
+    .section-header h2 { margin: 0; border: none; padding: 0; }
+    .section-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+
+    /* ── Cards ── */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
     .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 0.6rem 0.8rem; }
-    .card-label { font-size: 0.72rem; color: #8b949e; }
+    .card-label { font-size: 0.7rem; color: #8b949e; }
     .card-value { font-size: 1rem; color: #e6edf3; font-weight: 600; }
+
+    /* ── Tables ── */
     table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; font-size: 0.72rem; color: #8b949e; padding: 0.3rem 0.5rem;
+    th { text-align: left; font-size: 0.68rem; color: #8b949e; padding: 0.3rem 0.5rem;
          border-bottom: 1px solid #30363d; text-transform: uppercase; letter-spacing: 0.05em; }
-    td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #21262d; vertical-align: top; }
-    tr:hover td { background: #161b22; cursor: pointer; }
-    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
+    td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #21262d; vertical-align: middle; }
+    tr:hover td { background: #161b22; }
+    .run-row { cursor: pointer; }
+    .num { text-align: right; color: #8b949e; }
+    .num-hi { color: #e6edf3; }
+
+    /* ── Badges ── */
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.68rem; font-weight: 600; }
     .badge-success  { background: #1a4429; color: #3fb950; }
     .badge-partial  { background: #3d2c00; color: #e3b341; }
     .badge-failure  { background: #3d1414; color: #f85149; }
-    .num { text-align: right; color: #8b949e; }
-    .num-hi { color: #e6edf3; }
+    .badge-hidden   { background: #21262d; color: #8b949e; }
+    .badge-pending  { background: #1f3d5c; color: #58a6ff; }
+    .badge-disabled { background: #21262d; color: #8b949e; }
+    .badge-published { background: #1a4429; color: #3fb950; }
+    .badge-failed   { background: #3d1414; color: #f85149; }
+    .held-badge { background: #3d2c00; color: #e3b341; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; font-weight: 600; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.68rem;
+           font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit;
+           transition: opacity 0.1s; white-space: nowrap; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-hold    { background: #3d2c00; color: #e3b341; border-color: #5a4200; }
+    .btn-release { background: #1a4429; color: #3fb950; border-color: #2a6040; }
+    .btn-danger  { background: #3d1414; color: #f85149; border-color: #5a2020; }
+    .btn-action  { background: #1f3d5c; color: #58a6ff; border-color: #2d5980; }
+    .btn-neutral { background: #161b22; color: #8b949e; border-color: #30363d; }
+    .btn-primary { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+    .btn-danger-bulk { background: #5a0000; color: #f85149; border-color: #7d0000; padding: 3px 10px; }
+
+    /* ── Errors expand row ── */
     .errors-row { display: none; }
     .errors-row td { padding: 0.5rem 1rem; background: #0d1117; }
     .errors-row.open { display: table-row; }
@@ -120,87 +165,113 @@ function fmtTime(iso: string): string {
     .error-item:last-child { border-bottom: none; }
     .error-phase { color: #58a6ff; }
     .error-src { color: #8b949e; }
-    .notice { color: #8b949e; font-style: italic; padding: 1rem 0; }
+
+    /* ── Misc ── */
+    .notice { color: #8b949e; font-style: italic; padding: 0.75rem 0; }
     .fail-src { display: inline-flex; gap: 0.5rem; align-items: center;
                 background: #3d1414; border-radius: 4px; padding: 2px 8px; margin: 2px; font-size: 0.75rem; }
     .fail-src-count { color: #f85149; font-weight: 700; }
-    .btn { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem;
-           font-weight: 600; cursor: pointer; border: none; font-family: inherit; }
-    .btn-hold { background: #3d2c00; color: #e3b341; }
-    .btn-release { background: #1a4429; color: #3fb950; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .draft-title { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6edf3; }
-    .held-badge { background: #3d2c00; color: #e3b341; padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; }
+    .story-title { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6edf3; }
+    .action-group { display: flex; gap: 3px; flex-wrap: wrap; }
+    .days-input { width: 42px; padding: 2px 5px; font-size: 0.7rem; font-family: inherit;
+                  background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+                  color: #e6edf3; text-align: center; }
+
+    /* ── Toast ── */
+    #toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 999;
+             background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+             padding: 0.6rem 1rem; font-size: 0.8rem; min-width: 220px;
+             box-shadow: 0 4px 16px rgba(0,0,0,0.5); display: none; }
+    #toast.ok  { border-color: #3fb950; color: #3fb950; }
+    #toast.err { border-color: #f85149; color: #f85149; }
+    #toast.inf { border-color: #58a6ff; color: #58a6ff; }
   </style>
 </head>
 <body>
 
-<h1>⚙ News Hub — Ops</h1>
+<div class="header">
+  <h1>⚙ News Hub — Ops</h1>
+  <div class="header-controls">
+    <button class="refresh-btn" id="refresh-btn" data-i18n="refresh">↺ Обновить</button>
+    <div class="lang-toggle">
+      <button class="lang-btn active" id="lang-ru" onclick="setLang('ru')">RU</button>
+      <button class="lang-btn" id="lang-en" onclick="setLang('en')">EN</button>
+    </div>
+  </div>
+</div>
 
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<!-- ── Health ── -->
 {health ? (
   <div>
+    <h2 data-i18n="health">Состояние сервиса</h2>
     <div class="grid">
       <div class="card">
-        <div class="card-label">Service</div>
+        <div class="card-label" data-i18n="service">Сервис</div>
         <div class="card-value">{health.service.name} v{health.service.version}</div>
       </div>
       <div class="card">
-        <div class="card-label">Environment</div>
+        <div class="card-label" data-i18n="environment">Окружение</div>
         <div class="card-value">{health.service.env}</div>
       </div>
       <div class="card">
-        <div class="card-label">Server time</div>
+        <div class="card-label" data-i18n="serverTime">Время сервера</div>
         <div class="card-value" style="font-size:0.85rem">{fmtTime(health.service.now_utc)}</div>
       </div>
       {health.last_run && (
         <div class="card">
-          <div class="card-label">Last run status</div>
+          <div class="card-label" data-i18n="lastRun">Последний запуск</div>
           <div class="card-value">
             <span class={`badge badge-${health.last_run.status === 'success' ? 'success' : health.last_run.status === 'partial_failure' ? 'partial' : 'failure'}`}>
-              {health.last_run.status}
+              {health.last_run.status === 'partial_failure' ? 'partial' : health.last_run.status}
             </span>
             &nbsp;{fmtDuration(health.last_run.duration_ms)}
           </div>
         </div>
       )}
     </div>
-
     {health.top_failing_sources.length > 0 && (
-      <div>
-        <h2>Top failing sources (24h)</h2>
-        <div>
-          {health.top_failing_sources.map(s => (
-            <span class="fail-src">
-              {s.source_id} <span class="fail-src-count">{s.error_count}</span>
-            </span>
-          ))}
-        </div>
+      <div style="margin-bottom:0.75rem">
+        <span style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.05em" data-i18n="failingSources">Проблемные источники (24ч):</span>
+        &nbsp;
+        {health.top_failing_sources.map(s => (
+          <span class="fail-src">{s.source_id} <span class="fail-src-count">{s.error_count}</span></span>
+        ))}
       </div>
     )}
   </div>
 ) : (
-  <p class="notice">Health API unreachable.</p>
+  <p class="notice" data-i18n="healthUnreachable">Health API недоступен.</p>
 )}
 
-<h2>Recent runs</h2>
+<!-- ── Runs ── -->
+<div class="section-header">
+  <h2 data-i18n="recentRuns">Последние запуски</h2>
+  <div class="section-actions">
+    <input class="days-input" id="runs-days" type="number" value="7" min="1" max="365" title="days" />
+    <button class="btn btn-danger" id="purge-runs-btn" data-i18n="purgeRuns">Очистить старые</button>
+  </div>
+</div>
 
 {runs.length === 0 ? (
-  <p class="notice">No runs recorded yet.</p>
+  <p class="notice" data-i18n="noRuns">Запусков пока нет.</p>
 ) : (
   <table id="runs-table">
     <thead>
       <tr>
-        <th>Started</th>
-        <th>Status</th>
-        <th class="num">Dur</th>
+        <th data-i18n="started">Запущен</th>
+        <th data-i18n="status">Статус</th>
+        <th class="num" data-i18n="dur">Длит.</th>
         <th class="num">Src✓</th>
         <th class="num">Src✗</th>
-        <th class="num">Items</th>
-        <th class="num">New</th>
-        <th class="num">Stories</th>
+        <th class="num" data-i18n="items">Новости</th>
+        <th class="num" data-i18n="new">Новые</th>
+        <th class="num" data-i18n="stories">Сторис</th>
         <th class="num">Web</th>
         <th class="num">FB</th>
-        <th class="num">Errors</th>
+        <th class="num" data-i18n="errors">Ошибки</th>
       </tr>
     </thead>
     <tbody>
@@ -221,10 +292,10 @@ function fmtTime(iso: string): string {
             <td class="num">{r.stories_new}+{r.stories_updated}</td>
             <td class="num num-hi">{r.published_web}</td>
             <td class="num num-hi">{r.published_fb}</td>
-            <td class={`num ${r.errors_total > 0 ? '' : ''}`} style={r.errors_total > 0 ? 'color:#f85149' : ''}>{r.errors_total}</td>
+            <td class={`num`} style={r.errors_total > 0 ? 'color:#f85149' : ''}>{r.errors_total}</td>
           </tr>
           <tr class="errors-row" id={`errors-${r.run_id}`}>
-            <td colspan="11"><div class="errors-loading">Loading…</div></td>
+            <td colspan="11"><div class="errors-loading" data-i18n="loading">Загрузка…</div></td>
           </tr>
         </>
       ))}
@@ -232,53 +303,58 @@ function fmtTime(iso: string): string {
   </table>
 )}
 
-<h2>Draft stories</h2>
+<!-- ── Draft stories ── -->
+<div class="section-header">
+  <h2 data-i18n="draftStories">Черновики</h2>
+  <div class="section-actions">
+    <button class="btn btn-danger-bulk" id="delete-all-drafts-btn" data-i18n="deleteAllDrafts">🗑 Удалить все черновики ({draftCounts.total})</button>
+  </div>
+</div>
 
 <div class="grid" style="margin-bottom:0.75rem">
   <div class="card">
-    <div class="card-label">Total drafts</div>
+    <div class="card-label" data-i18n="totalDrafts">Всего черновиков</div>
     <div class="card-value">{draftCounts.total}</div>
   </div>
   <div class="card">
-    <div class="card-label">Pending (next runs)</div>
+    <div class="card-label" data-i18n="pending">В очереди</div>
     <div class="card-value" style="color:#3fb950">{draftCounts.pending}</div>
   </div>
   <div class="card">
-    <div class="card-label">On hold (blocked)</div>
+    <div class="card-label" data-i18n="onHold">На удержании</div>
     <div class="card-value" style={draftCounts.held > 0 ? 'color:#e3b341' : ''}>{draftCounts.held}</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Published today cap</div>
-    <div class="card-value" style="color:#8b949e">5/run × 3 runs</div>
   </div>
 </div>
 
 {drafts.length === 0 ? (
-  <p class="notice">No draft stories pending review.</p>
+  <p class="notice" data-i18n="noDrafts">Нет черновиков для проверки.</p>
 ) : (
   <table id="drafts-table">
     <thead>
       <tr>
-        <th>Updated</th>
-        <th>Title (he)</th>
-        <th class="num">Items</th>
-        <th>Status</th>
-        <th>Action</th>
+        <th data-i18n="updated">Обновлён</th>
+        <th data-i18n="titleHe">Заголовок (he)</th>
+        <th class="num" data-i18n="itemsCount">Новостей</th>
+        <th data-i18n="status">Статус</th>
+        <th data-i18n="actions">Действия</th>
       </tr>
     </thead>
     <tbody>
       {drafts.map((d) => (
-        <tr>
+        <tr data-story-id={d.story_id}>
           <td style="white-space:nowrap">{fmtTime(d.last_update_at)}</td>
-          <td class="draft-title" title={d.title_sample ?? ''}>{d.title_sample ?? '—'}</td>
+          <td class="story-title" title={d.title_sample ?? ''}>{d.title_sample ?? '—'}</td>
           <td class="num">{d.item_count}</td>
-          <td>{d.editorial_hold ? <span class="held-badge">HELD</span> : <span style="color:#8b949e">pending</span>}</td>
+          <td>{d.editorial_hold ? <span class="held-badge">HELD</span> : <span style="color:#3fb950;font-size:0.7rem">pending</span>}</td>
           <td>
-            {d.editorial_hold ? (
-              <button class="btn btn-release draft-action" data-story-id={d.story_id} data-action="release">Release</button>
-            ) : (
-              <button class="btn btn-hold draft-action" data-story-id={d.story_id} data-action="hold">Hold</button>
-            )}
+            <div class="action-group">
+              {d.editorial_hold ? (
+                <button class="btn btn-release draft-action" data-story-id={d.story_id} data-action="release" data-i18n-label="release">Снять</button>
+              ) : (
+                <button class="btn btn-hold draft-action" data-story-id={d.story_id} data-action="hold" data-i18n-label="hold">Удержать</button>
+              )}
+              <button class="btn btn-danger story-delete-btn" data-story-id={d.story_id} data-title={d.title_sample ?? d.story_id} data-i18n-label="delete">Удалить</button>
+            </div>
           </td>
         </tr>
       ))}
@@ -286,81 +362,407 @@ function fmtTime(iso: string): string {
   </table>
 )}
 
-<script define:vars={{ apiBase, adminToken }}>
-  const rows = document.querySelectorAll('.run-row');
-  rows.forEach(row => {
-    row.addEventListener('click', async () => {
-      const runId = row.dataset.runId;
-      const errRow = document.getElementById(`errors-${runId}`);
-      if (!errRow) return;
+<!-- ── Published stories ── -->
+<div class="section-header">
+  <h2 data-i18n="publishedStories">Опубликованные</h2>
+</div>
 
-      if (errRow.classList.contains('open')) {
-        errRow.classList.remove('open');
-        return;
-      }
+{published.length === 0 ? (
+  <p class="notice" data-i18n="noPublished">Нет опубликованных историй.</p>
+) : (
+  <table id="published-table">
+    <thead>
+      <tr>
+        <th data-i18n="updated">Обновлён</th>
+        <th data-i18n="titleRu">Заголовок (ru)</th>
+        <th data-i18n="category">Категория</th>
+        <th>FB</th>
+        <th class="num">Попыток</th>
+        <th data-i18n="actions">Действия</th>
+      </tr>
+    </thead>
+    <tbody>
+      {published.map((s) => (
+        <tr data-story-id={s.story_id}>
+          <td style="white-space:nowrap">{fmtTime(s.last_update_at)}</td>
+          <td class="story-title" title={s.title_ru ?? ''}>{s.title_ru ?? '—'}</td>
+          <td><span style="color:#8b949e;font-size:0.7rem">{s.category}</span></td>
+          <td>
+            <span class={`badge badge-${s.fb_status ?? 'disabled'}`}>{s.fb_status ?? 'n/a'}</span>
+          </td>
+          <td class="num">{s.fb_attempts}</td>
+          <td>
+            <div class="action-group">
+              <button class="btn btn-action story-fb-reset-btn" data-story-id={s.story_id} data-i18n-label="fbReset">FB Reset</button>
+              <button class="btn btn-neutral story-hide-btn" data-story-id={s.story_id} data-title={s.title_ru ?? s.story_id} data-i18n-label="hide">Скрыть</button>
+              <button class="btn btn-danger story-delete-btn" data-story-id={s.story_id} data-title={s.title_ru ?? s.story_id} data-i18n-label="delete">Удалить</button>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
 
-      const container = errRow.querySelector('div');
-      if (container && container.textContent === 'Loading…') {
-        try {
-          const fetchHeaders = adminToken ? { 'x-admin-token': adminToken } : {};
-          const res = await fetch(
-            `${apiBase}/api/v1/admin/errors?run_id=${encodeURIComponent(runId)}`,
-            { headers: fetchHeaders },
-          );
-          const json = await res.json();
-          if (json.ok && json.data.errors.length === 0) {
-            container.innerHTML = '<span style="color:#3fb950">No errors for this run.</span>';
-          } else if (json.ok) {
-            container.innerHTML = json.data.errors.map(e =>
-              `<div class="error-item">
-                <span class="error-phase">[${e.phase}]</span>
-                ${e.source_id ? `<span class="error-src"> ${e.source_id}</span>` : ''}
-                ${e.story_id ? `<span class="error-src"> story:${e.story_id.slice(0,8)}</span>` : ''}
-                — ${e.message ?? '(no message)'}
-              </div>`
-            ).join('');
-          } else {
-            container.innerHTML = '<span style="color:#f85149">Failed to load errors.</span>';
-          }
-        } catch {
-          container.innerHTML = '<span style="color:#f85149">API error.</span>';
-        }
-      }
-      errRow.classList.add('open');
-    });
+<!-- ── Maintenance ── -->
+<div class="section-header">
+  <h2 data-i18n="maintenance">Обслуживание</h2>
+</div>
+
+<div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+  <div style="display:flex;gap:0.4rem;align-items:center">
+    <input class="days-input" id="errors-days" type="number" value="3" min="1" max="365" />
+    <button class="btn btn-danger" id="purge-errors-btn" data-i18n="purgeErrors">Очистить ошибки</button>
+  </div>
+  <button class="btn btn-primary" id="trigger-cron-btn" data-i18n="triggerCron">▶ Запустить цикл</button>
+</div>
+
+<script define:vars={{ apiBase, adminToken, draftTotal: draftCounts.total }}>
+
+// ── i18n ────────────────────────────────────────────────────────────────────
+const STRINGS = {
+  ru: {
+    health: 'Состояние сервиса', service: 'Сервис', environment: 'Окружение',
+    serverTime: 'Время сервера', lastRun: 'Последний запуск',
+    failingSources: 'Проблемные источники (24ч):',
+    healthUnreachable: 'Health API недоступен.',
+    recentRuns: 'Последние запуски', purgeRuns: 'Очистить старые',
+    noRuns: 'Запусков пока нет.',
+    started: 'Запущен', status: 'Статус', dur: 'Длит.',
+    items: 'Новости', new: 'Новые', stories: 'Сторис', errors: 'Ошибки',
+    loading: 'Загрузка…',
+    draftStories: 'Черновики',
+    totalDrafts: 'Всего черновиков', pending: 'В очереди', onHold: 'На удержании',
+    noDrafts: 'Нет черновиков для проверки.',
+    updated: 'Обновлён', titleHe: 'Заголовок (he)', itemsCount: 'Новостей', actions: 'Действия',
+    publishedStories: 'Опубликованные',
+    noPublished: 'Нет опубликованных историй.',
+    titleRu: 'Заголовок (ru)', category: 'Категория',
+    maintenance: 'Обслуживание',
+    purgeErrors: 'Очистить ошибки',
+    triggerCron: '▶ Запустить цикл',
+    refresh: '↺ Обновить',
+    // button labels
+    hold: 'Удержать', release: 'Снять', delete: 'Удалить',
+    hide: 'Скрыть', fbReset: 'FB Reset',
+    // dynamic strings (functions)
+    deleteAllDrafts: (n) => `🗑 Удалить все черновики (${n})`,
+    confirmDeleteStory: (t) => `Удалить историю?\n\n"${t}"`,
+    confirmDeleteAllDrafts: (n) => `Удалить ВСЕ ${n} черновиков? Это необратимо.`,
+    confirmHide: (t) => `Скрыть историю из ленты?\n\n"${t}"`,
+    confirmPurgeRuns: (d) => `Удалить все запуски старше ${d} дней?`,
+    confirmPurgeErrors: (d) => `Удалить все ошибки старше ${d} дней?`,
+    confirmTriggerCron: () => 'Запустить цикл сбора новостей прямо сейчас?',
+    toastDeletedStory: 'История удалена',
+    toastDeletedDrafts: (n) => `Удалено черновиков: ${n}`,
+    toastHidden: 'История скрыта',
+    toastFbReset: 'FB статус сброшен',
+    toastPurgedRuns: (n, d) => `Удалено запусков: ${n} (старше ${d} д.)`,
+    toastPurgedErrors: (n, d) => `Удалено ошибок: ${n} (старше ${d} д.)`,
+    toastCronTriggered: 'Цикл запущен. Проверьте раздел запусков через ~15с.',
+    toastErr: (msg) => `Ошибка: ${msg}`,
+    noErrors: 'Нет ошибок для этого запуска.',
+    errLoad: 'Ошибка загрузки.',
+  },
+  en: {
+    health: 'Service Health', service: 'Service', environment: 'Environment',
+    serverTime: 'Server Time', lastRun: 'Last Run',
+    failingSources: 'Top failing sources (24h):',
+    healthUnreachable: 'Health API unreachable.',
+    recentRuns: 'Recent Runs', purgeRuns: 'Purge Old',
+    noRuns: 'No runs recorded yet.',
+    started: 'Started', status: 'Status', dur: 'Dur.',
+    items: 'Items', new: 'New', stories: 'Stories', errors: 'Errors',
+    loading: 'Loading…',
+    draftStories: 'Draft Stories',
+    totalDrafts: 'Total Drafts', pending: 'Pending', onHold: 'On Hold',
+    noDrafts: 'No draft stories pending review.',
+    updated: 'Updated', titleHe: 'Title (he)', itemsCount: 'Items', actions: 'Actions',
+    publishedStories: 'Published Stories',
+    noPublished: 'No published stories.',
+    titleRu: 'Title (ru)', category: 'Category',
+    maintenance: 'Maintenance',
+    purgeErrors: 'Purge Errors',
+    triggerCron: '▶ Trigger Cycle',
+    refresh: '↺ Refresh',
+    hold: 'Hold', release: 'Release', delete: 'Delete',
+    hide: 'Hide', fbReset: 'FB Reset',
+    deleteAllDrafts: (n) => `🗑 Delete All Drafts (${n})`,
+    confirmDeleteStory: (t) => `Delete this story?\n\n"${t}"`,
+    confirmDeleteAllDrafts: (n) => `Delete ALL ${n} drafts? This is irreversible.`,
+    confirmHide: (t) => `Hide this story from the feed?\n\n"${t}"`,
+    confirmPurgeRuns: (d) => `Delete all runs older than ${d} days?`,
+    confirmPurgeErrors: (d) => `Delete all errors older than ${d} days?`,
+    confirmTriggerCron: () => 'Trigger a news collection cycle right now?',
+    toastDeletedStory: 'Story deleted',
+    toastDeletedDrafts: (n) => `Deleted ${n} drafts`,
+    toastHidden: 'Story hidden',
+    toastFbReset: 'FB status reset',
+    toastPurgedRuns: (n, d) => `Deleted ${n} runs (older than ${d} d.)`,
+    toastPurgedErrors: (n, d) => `Deleted ${n} errors (older than ${d} d.)`,
+    toastCronTriggered: 'Cycle triggered. Check runs in ~15s.',
+    toastErr: (msg) => `Error: ${msg}`,
+    noErrors: 'No errors for this run.',
+    errLoad: 'Failed to load errors.',
+  },
+};
+
+let lang = localStorage.getItem('ops-lang') || 'ru';
+
+function setLang(l) {
+  lang = l;
+  localStorage.setItem('ops-lang', l);
+  document.getElementById('lang-ru').classList.toggle('active', l === 'ru');
+  document.getElementById('lang-en').classList.toggle('active', l === 'en');
+  applyTranslations();
+}
+
+function t(key) {
+  return STRINGS[lang][key] ?? STRINGS['ru'][key] ?? key;
+}
+
+function applyTranslations() {
+  // Static text nodes
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (typeof val === 'string') el.textContent = val;
   });
+  // Button labels via data-i18n-label
+  document.querySelectorAll('[data-i18n-label]').forEach(el => {
+    const key = el.getAttribute('data-i18n-label');
+    const val = t(key);
+    if (typeof val === 'string') el.textContent = val;
+  });
+  // Special: delete-all-drafts button includes count
+  const delAllBtn = document.getElementById('delete-all-drafts-btn');
+  if (delAllBtn) {
+    const fn = STRINGS[lang].deleteAllDrafts;
+    if (typeof fn === 'function') delAllBtn.textContent = fn(draftTotal);
+  }
+}
 
-  // Hold / Release buttons
-  document.querySelectorAll('.draft-action').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const button = /** @type {HTMLButtonElement} */ (btn);
-      const storyId = button.dataset.storyId;
-      const action = button.dataset.action;
-      if (!storyId || !action) return;
+// Apply on load using saved lang
+setLang(lang);
 
-      button.disabled = true;
-      button.textContent = '…';
+// ── Toast ────────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = type; // 'ok' | 'err' | 'inf'
+  el.style.display = 'block';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
 
+// ── API helper ───────────────────────────────────────────────────────────────
+const H = adminToken ? { 'x-admin-token': adminToken } : {};
+
+async function api(method, path) {
+  const res = await fetch(`${apiBase}${path}`, { method, headers: H });
+  return res.json();
+}
+
+// ── Runs: expand errors on click ─────────────────────────────────────────────
+document.querySelectorAll('.run-row').forEach(row => {
+  row.addEventListener('click', async () => {
+    const runId = row.dataset.runId;
+    const errRow = document.getElementById(`errors-${runId}`);
+    if (!errRow) return;
+    if (errRow.classList.contains('open')) { errRow.classList.remove('open'); return; }
+    const container = errRow.querySelector('div');
+    if (container && container.textContent.trim() === t('loading')) {
       try {
-        const fetchHeaders = adminToken ? { 'x-admin-token': adminToken } : {};
-        const res = await fetch(
-          `${apiBase}/api/v1/admin/story/${encodeURIComponent(storyId)}/${action}`,
-          { method: 'POST', headers: fetchHeaders },
-        );
-        if (res.ok) {
-          window.location.reload();
+        const json = await api('GET', `/api/v1/admin/errors?run_id=${encodeURIComponent(runId)}`);
+        if (json.ok && json.data.errors.length === 0) {
+          container.innerHTML = `<span style="color:#3fb950">${t('noErrors')}</span>`;
+        } else if (json.ok) {
+          container.innerHTML = json.data.errors.map(e =>
+            `<div class="error-item">
+               <span class="error-phase">[${e.phase}]</span>
+               ${e.source_id ? `<span class="error-src"> ${e.source_id}</span>` : ''}
+               ${e.story_id ? `<span class="error-src"> story:${e.story_id.slice(0,8)}</span>` : ''}
+               — ${e.message ?? '(no message)'}
+             </div>`
+          ).join('');
         } else {
-          button.disabled = false;
-          button.textContent = action === 'hold' ? 'Hold' : 'Release';
-          alert(`Failed: ${res.status}`);
+          container.innerHTML = `<span style="color:#f85149">${t('errLoad')}</span>`;
         }
       } catch {
-        button.disabled = false;
-        button.textContent = action === 'hold' ? 'Hold' : 'Release';
-        alert('Network error');
+        container.innerHTML = `<span style="color:#f85149">${t('errLoad')}</span>`;
       }
-    });
+    }
+    errRow.classList.add('open');
   });
+});
+
+// ── Purge old runs ────────────────────────────────────────────────────────────
+document.getElementById('purge-runs-btn').addEventListener('click', async () => {
+  const days = parseInt(document.getElementById('runs-days').value, 10) || 7;
+  const fn = STRINGS[lang].confirmPurgeRuns;
+  if (!confirm(fn(days))) return;
+  try {
+    const json = await api('DELETE', `/api/v1/admin/runs/old?days=${days}`);
+    if (json.ok) {
+      const fn2 = STRINGS[lang].toastPurgedRuns;
+      toast(fn2(json.data.deleted, days), 'ok');
+    } else {
+      toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+    }
+  } catch { toast(t('toastErr')('network'), 'err'); }
+});
+
+// ── Delete all drafts ─────────────────────────────────────────────────────────
+document.getElementById('delete-all-drafts-btn').addEventListener('click', async () => {
+  const fn = STRINGS[lang].confirmDeleteAllDrafts;
+  if (!confirm(fn(draftTotal))) return;
+  try {
+    const json = await api('DELETE', '/api/v1/admin/drafts');
+    if (json.ok) {
+      const fn2 = STRINGS[lang].toastDeletedDrafts;
+      toast(fn2(json.data.deleted), 'ok');
+      setTimeout(() => window.location.reload(), 1200);
+    } else {
+      toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+    }
+  } catch { toast(t('toastErr')('network'), 'err'); }
+});
+
+// ── Draft Hold / Release ──────────────────────────────────────────────────────
+document.querySelectorAll('.draft-action').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const storyId = btn.dataset.storyId;
+    const action = btn.dataset.action;
+    if (!storyId || !action) return;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const json = await api('POST', `/api/v1/admin/story/${encodeURIComponent(storyId)}/${action}`);
+      if (json.ok) {
+        window.location.reload();
+      } else {
+        btn.disabled = false;
+        btn.textContent = t(action === 'hold' ? 'hold' : 'release');
+        toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+      }
+    } catch {
+      btn.disabled = false;
+      btn.textContent = t(action === 'hold' ? 'hold' : 'release');
+      toast(t('toastErr')('network'), 'err');
+    }
+  });
+});
+
+// ── Delete story (draft or published) ────────────────────────────────────────
+document.querySelectorAll('.story-delete-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const storyId = btn.dataset.storyId;
+    const title = btn.dataset.title ?? storyId;
+    const fn = STRINGS[lang].confirmDeleteStory;
+    if (!confirm(fn(title))) return;
+    btn.disabled = true;
+    try {
+      const json = await api('DELETE', `/api/v1/admin/story/${encodeURIComponent(storyId)}`);
+      if (json.ok) {
+        toast(t('toastDeletedStory'), 'ok');
+        const row = btn.closest('tr');
+        if (row) row.style.opacity = '0.3';
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        btn.disabled = false;
+        toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+      }
+    } catch {
+      btn.disabled = false;
+      toast(t('toastErr')('network'), 'err');
+    }
+  });
+});
+
+// ── Hide published story ──────────────────────────────────────────────────────
+document.querySelectorAll('.story-hide-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const storyId = btn.dataset.storyId;
+    const title = btn.dataset.title ?? storyId;
+    const fn = STRINGS[lang].confirmHide;
+    if (!confirm(fn(title))) return;
+    btn.disabled = true;
+    try {
+      const json = await api('POST', `/api/v1/admin/story/${encodeURIComponent(storyId)}/hide`);
+      if (json.ok) {
+        toast(t('toastHidden'), 'ok');
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        btn.disabled = false;
+        toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+      }
+    } catch {
+      btn.disabled = false;
+      toast(t('toastErr')('network'), 'err');
+    }
+  });
+});
+
+// ── Reset FB status ───────────────────────────────────────────────────────────
+document.querySelectorAll('.story-fb-reset-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const storyId = btn.dataset.storyId;
+    btn.disabled = true;
+    try {
+      const json = await api('POST', `/api/v1/admin/story/${encodeURIComponent(storyId)}/fb-reset`);
+      if (json.ok) {
+        toast(t('toastFbReset'), 'inf');
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        btn.disabled = false;
+        toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+      }
+    } catch {
+      btn.disabled = false;
+      toast(t('toastErr')('network'), 'err');
+    }
+  });
+});
+
+// ── Purge old errors ──────────────────────────────────────────────────────────
+document.getElementById('purge-errors-btn').addEventListener('click', async () => {
+  const days = parseInt(document.getElementById('errors-days').value, 10) || 3;
+  const fn = STRINGS[lang].confirmPurgeErrors;
+  if (!confirm(fn(days))) return;
+  try {
+    const json = await api('DELETE', `/api/v1/admin/errors/old?days=${days}`);
+    if (json.ok) {
+      const fn2 = STRINGS[lang].toastPurgedErrors;
+      toast(fn2(json.data.deleted, days), 'ok');
+    } else {
+      toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+    }
+  } catch { toast(t('toastErr')('network'), 'err'); }
+});
+
+// ── Trigger cron ──────────────────────────────────────────────────────────────
+document.getElementById('trigger-cron-btn').addEventListener('click', async () => {
+  const fn = STRINGS[lang].confirmTriggerCron;
+  if (!confirm(fn())) return;
+  const btn = document.getElementById('trigger-cron-btn');
+  btn.disabled = true;
+  try {
+    const json = await api('POST', '/api/v1/admin/cron/trigger');
+    if (json.ok) {
+      toast(t('toastCronTriggered'), 'inf');
+    } else {
+      toast(t('toastErr')(json.error?.message ?? '?'), 'err');
+    }
+  } catch {
+    toast(t('toastErr')('network'), 'err');
+  } finally {
+    setTimeout(() => { btn.disabled = false; }, 5000);
+  }
+});
+
+// ── Page refresh ──────────────────────────────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', () => window.location.reload());
 </script>
 
 </body>

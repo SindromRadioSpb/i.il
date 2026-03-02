@@ -579,6 +579,8 @@ async def scheduler_loop(settings: Settings) -> None:
 
 async def run_status(settings: Settings) -> None:
     """Print a concise dashboard of the current pipeline state."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     async with get_db(settings.database_path) as db:
         async with db.execute(
             "SELECT state, COUNT(*) as n FROM stories GROUP BY state"
@@ -648,6 +650,8 @@ async def run_status(settings: Settings) -> None:
 
 async def run_preview_fb(settings: Settings, count: int = 3) -> None:
     """Show the next N pending FB posts with full text — no publishing."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     async with get_db(settings.database_path) as db:
         async with db.execute(
             """
@@ -670,7 +674,7 @@ async def run_preview_fb(settings: Settings, count: int = 3) -> None:
     print(f"\n=== FB Preview: next {len(rows)} post(s) [NOT published] ===")
     for i, r in enumerate(rows, 1):
         fmt = "WOW" if r["fb_caption"] else "LEGACY"
-        print(f"\n{'─'*50}")
+        print(f"\n{'-'*50}")
         print(f"  Post {i}  [{fmt}]  [{r['category']}]")
         print(f"  Title: {r['title_ru']}")
         print()
@@ -678,7 +682,7 @@ async def run_preview_fb(settings: Settings, count: int = 3) -> None:
             print(r["fb_caption"])
         else:
             print("  (no WOW caption — will fall back to legacy format)")
-    print(f"\n{'─'*50}\n")
+    print(f"\n{'-'*50}\n")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

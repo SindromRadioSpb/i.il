@@ -1,7 +1,12 @@
 import type { ExecutionContext } from '@cloudflare/workers-types';
 import type { Env } from './index';
 import { getLastRun, getTopFailingSources } from './api/health';
-import { getRecentRuns, getRunErrors, getDraftStories, getDraftCounts, holdStory, releaseStory } from './api/admin';
+import {
+  getRecentRuns, getRunErrors,
+  getDraftStories, getDraftCounts, holdStory, releaseStory,
+  deleteStory, deleteAllDrafts, hideStory, resetFbStatus,
+  purgeOldRuns, purgeOldErrors, getPublishedStories,
+} from './api/admin';
 import { getFeed } from './api/feed';
 import { getStory } from './api/story';
 import { handleSync } from './api/sync';
@@ -75,7 +80,7 @@ export async function route(
           headers: corsOrigin
             ? {
                 'access-control-allow-origin': corsOrigin,
-                'access-control-allow-methods': 'GET, POST, OPTIONS',
+                'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
                 'access-control-allow-headers': 'x-admin-token',
                 'access-control-max-age': '86400',
               }
@@ -177,6 +182,77 @@ export async function route(
           200,
           corsOrigin,
         );
+      }
+
+      // GET /api/v1/admin/published — published stories for admin review
+      if (request.method === 'GET' && pathname === '/api/v1/admin/published') {
+        const stories = await getPublishedStories(env.DB);
+        return adminJson({ ok: true, data: { stories } }, 200, corsOrigin);
+      }
+
+      // DELETE /api/v1/admin/story/:id — delete a story (any state)
+      const deleteStoryMatch = /^\/api\/v1\/admin\/story\/([^/]+)$/.exec(pathname);
+      if (request.method === 'DELETE' && deleteStoryMatch !== null) {
+        const storyId = deleteStoryMatch[1]!;
+        const deleted = await deleteStory(env.DB, storyId);
+        if (!deleted) {
+          return adminJson(
+            { ok: false, error: { code: 'not_found', message: 'Story not found', details: {} } },
+            404,
+            corsOrigin,
+          );
+        }
+        return adminJson({ ok: true, data: { story_id: storyId, deleted: true } }, 200, corsOrigin);
+      }
+
+      // DELETE /api/v1/admin/drafts — delete all draft stories
+      if (request.method === 'DELETE' && pathname === '/api/v1/admin/drafts') {
+        const count = await deleteAllDrafts(env.DB);
+        return adminJson({ ok: true, data: { deleted: count } }, 200, corsOrigin);
+      }
+
+      // POST /api/v1/admin/story/:id/hide — hide a published story
+      const hideMatch = /^\/api\/v1\/admin\/story\/([^/]+)\/hide$/.exec(pathname);
+      if (request.method === 'POST' && hideMatch !== null) {
+        const storyId = hideMatch[1]!;
+        const updated = await hideStory(env.DB, storyId);
+        if (!updated) {
+          return adminJson(
+            { ok: false, error: { code: 'not_found', message: 'Published story not found', details: {} } },
+            404,
+            corsOrigin,
+          );
+        }
+        return adminJson({ ok: true, data: { story_id: storyId, state: 'hidden' } }, 200, corsOrigin);
+      }
+
+      // POST /api/v1/admin/story/:id/fb-reset — reset FB publishing status
+      const fbResetMatch = /^\/api\/v1\/admin\/story\/([^/]+)\/fb-reset$/.exec(pathname);
+      if (request.method === 'POST' && fbResetMatch !== null) {
+        const storyId = fbResetMatch[1]!;
+        const updated = await resetFbStatus(env.DB, storyId);
+        if (!updated) {
+          return adminJson(
+            { ok: false, error: { code: 'not_found', message: 'Story publications row not found', details: {} } },
+            404,
+            corsOrigin,
+          );
+        }
+        return adminJson({ ok: true, data: { story_id: storyId, fb_status: 'pending' } }, 200, corsOrigin);
+      }
+
+      // DELETE /api/v1/admin/runs/old?days=N — purge old runs (cascades to error_events)
+      if (request.method === 'DELETE' && pathname === '/api/v1/admin/runs/old') {
+        const days = Math.max(1, parseInt(url.searchParams.get('days') ?? '7', 10) || 7);
+        const count = await purgeOldRuns(env.DB, days);
+        return adminJson({ ok: true, data: { deleted: count, days } }, 200, corsOrigin);
+      }
+
+      // DELETE /api/v1/admin/errors/old?days=N — purge old error_events
+      if (request.method === 'DELETE' && pathname === '/api/v1/admin/errors/old') {
+        const days = Math.max(1, parseInt(url.searchParams.get('days') ?? '3', 10) || 3);
+        const count = await purgeOldErrors(env.DB, days);
+        return adminJson({ ok: true, data: { deleted: count, days } }, 200, corsOrigin);
       }
     }
 
