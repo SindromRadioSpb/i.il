@@ -975,7 +975,9 @@ function leHandleEvent(ev) {
   }
 }
 
-async function leConnect() {
+const LE_STORAGE_KEY = 'le_url';
+
+async function leConnect(silent = false) {
   if (leEventSource) { leEventSource.close(); leEventSource = null; }
 
   const url = (leEl('le-url').value || 'http://localhost:9090').replace(/\/$/, '');
@@ -987,9 +989,12 @@ async function leConnect() {
     const json = await resp.json();
     if (!json.ok) throw new Error('Engine returned ok:false');
   } catch (err) {
-    toast(`Движок недоступен: ${err.message}`, 'err');
+    if (!silent) toast(`Движок недоступен: ${err.message}`, 'err');
     return;
   }
+
+  // Persist URL for auto-reconnect on next page load
+  try { localStorage.setItem(LE_STORAGE_KEY, url); } catch { /* ignore */ }
 
   // Show UI
   leEl('le-connect-btn').style.display = 'none';
@@ -1024,12 +1029,13 @@ async function leConnect() {
     leLog('⚠ SSE соединение прервано', '#e3b341');
     leSetStatus('idle');
   };
-  toast('Движок подключён', 'ok');
+  if (!silent) toast('Движок подключён', 'ok');
 }
 
 function leDisconnect() {
   if (leEventSource) { leEventSource.close(); leEventSource = null; }
   leStopElapsedTimer();
+  try { localStorage.removeItem(LE_STORAGE_KEY); } catch { /* ignore */ }
   leEl('le-connect-btn').style.display = '';
   leEl('le-disconnect-btn').style.display = 'none';
   leEl('le-delete-drafts-btn').style.display = 'none';
@@ -1037,6 +1043,17 @@ function leDisconnect() {
   leEl('le-event-log').style.display = 'none';
   leEl('le-disconnected-notice').style.display = '';
 }
+
+// Auto-reconnect on page load if URL was previously saved
+(function leAutoReconnect() {
+  try {
+    const saved = localStorage.getItem(LE_STORAGE_KEY);
+    if (saved) {
+      leEl('le-url').value = saved;
+      leConnect(true);  // silent=true: no toast on auto-reconnect attempt
+    }
+  } catch { /* ignore */ }
+})();
 
 async function leDeleteDrafts() {
   const url = (leEl('le-url').value || 'http://localhost:9090').replace(/\/$/, '');
