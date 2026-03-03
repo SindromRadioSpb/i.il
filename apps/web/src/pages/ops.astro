@@ -240,6 +240,32 @@ function fmtTime(iso: string): string {
 </div>
 <p id="le-disconnected-notice" class="notice" data-i18n="leNotConnected">Движок не подключён. Введите адрес API и нажмите "Подключить".</p>
 
+<!-- ── Local Published (shown only when LE connected) ── -->
+<div id="le-published-section" style="display:none;margin-bottom:1rem">
+  <div class="section-header" style="margin-top:0.5rem">
+    <h2 data-i18n="leLocalPublished">Локальная БД — Опубликованные</h2>
+    <div class="section-actions">
+      <button class="btn btn-neutral" id="le-refresh-published-btn" data-i18n="leRefresh">Обновить</button>
+    </div>
+  </div>
+  <div id="le-published-empty" class="notice" style="display:none" data-i18n="leNoLocalPublished">Нет опубликованных историй в локальной БД.</div>
+  <div id="le-published-table-wrap" style="display:none;overflow-x:auto">
+    <table id="le-published-table">
+      <thead>
+        <tr>
+          <th data-i18n="updated">Обновлён</th>
+          <th data-i18n="title">Заголовок</th>
+          <th data-i18n="category">Категория</th>
+          <th>FB</th>
+          <th>FB Post ID</th>
+          <th data-i18n="fbPosted">FB время</th>
+        </tr>
+      </thead>
+      <tbody id="le-published-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- ── Health ── -->
 {health ? (
   <div>
@@ -466,6 +492,9 @@ const LE_RU = {
   leDeleteDrafts: 'Удалить черновики',
   leDeleteDraftsConfirm: (n) => `Удалить ${n !== undefined ? n + ' ' : ''}черновиков из локальной БД?`,
   leDeleteDraftsOk: (n) => `Удалено ${n} черновиков из локальной БД`,
+  leLocalPublished: 'Локальная БД — Опубликованные',
+  leNoLocalPublished: 'Нет опубликованных историй в локальной БД.',
+  leRefresh: 'Обновить',
   leStatus: { idle: 'ожидание', running: 'работает', sleeping: 'пауза' },
   lePhases: { ingest: 'Сбор RSS', summary: 'Суммаризация', images: 'Изображения', fb: 'Facebook', sync: 'Синхронизация' },
 };
@@ -478,6 +507,9 @@ const LE_EN = {
   leDeleteDrafts: 'Delete local drafts',
   leDeleteDraftsConfirm: (n) => `Delete ${n !== undefined ? n + ' ' : ''}drafts from local DB?`,
   leDeleteDraftsOk: (n) => `Deleted ${n} drafts from local DB`,
+  leLocalPublished: 'Local DB — Published',
+  leNoLocalPublished: 'No published stories in local DB.',
+  leRefresh: 'Refresh',
   leStatus: { idle: 'idle', running: 'running', sleeping: 'sleeping' },
   lePhases: { ingest: 'RSS Ingest', summary: 'Summarisation', images: 'Images', fb: 'Facebook', sync: 'CF Sync' },
 };
@@ -1004,6 +1036,7 @@ async function leConnect(silent = false) {
   leEl('le-status-bar').style.display = '';
   leEl('le-event-log').style.display = '';
   leEl('le-log-empty').style.display = '';
+  leEl('le-published-section').style.display = '';
 
   // Fetch initial status
   try {
@@ -1019,6 +1052,9 @@ async function leConnect(silent = false) {
       }
     }
   } catch { /* ignore */ }
+
+  // Load local published stories
+  await leLoadPublished();
 
   // Open SSE stream
   leEventSource = new EventSource(`${url}/stream`);
@@ -1041,6 +1077,7 @@ function leDisconnect() {
   leEl('le-delete-drafts-btn').style.display = 'none';
   leEl('le-status-bar').style.display = 'none';
   leEl('le-event-log').style.display = 'none';
+  leEl('le-published-section').style.display = 'none';
   leEl('le-disconnected-notice').style.display = '';
 }
 
@@ -1073,9 +1110,49 @@ async function leDeleteDrafts() {
   }
 }
 
+// ── Local Published table ─────────────────────────────────────────────────────
+
+async function leLoadPublished() {
+  const url = (leEl('le-url').value || 'http://localhost:9090').replace(/\/$/, '');
+  try {
+    const resp = await fetch(`${url}/published`);
+    const json = await resp.json();
+    if (!json.ok) return;
+    const stories = json.stories || [];
+    const tbody = leEl('le-published-tbody');
+    tbody.innerHTML = '';
+    if (stories.length === 0) {
+      leEl('le-published-empty').style.display = '';
+      leEl('le-published-table-wrap').style.display = 'none';
+      return;
+    }
+    leEl('le-published-empty').style.display = 'none';
+    leEl('le-published-table-wrap').style.display = '';
+    for (const s of stories) {
+      const fbColor = s.fb_status === 'posted' ? '#3fb950' : s.fb_status === 'failed' ? '#f85149' : '#8b949e';
+      const shortId = (s.story_id || '').slice(0, 8);
+      const title = s.title_ru || s.story_id || '—';
+      const cat = s.category || '—';
+      const fbStatus = s.fb_status || '—';
+      const fbPostId = s.fb_post_id ? `<a href="https://facebook.com/${s.fb_post_id}" target="_blank" style="color:#58a6ff">${s.fb_post_id.slice(0,12)}…</a>` : '—';
+      const fbTime = s.fb_posted_at ? fmtTime(s.fb_posted_at) : '—';
+      const updated = s.last_update_at ? fmtTime(s.last_update_at) : '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="white-space:nowrap">${updated}</td>`
+        + `<td title="${shortId}">${title.length > 60 ? title.slice(0, 60) + '…' : title}</td>`
+        + `<td><span class="badge badge-other">${cat}</span></td>`
+        + `<td style="color:${fbColor}">${fbStatus}</td>`
+        + `<td style="font-size:0.68rem">${fbPostId}</td>`
+        + `<td style="white-space:nowrap">${fbTime}</td>`;
+      tbody.appendChild(tr);
+    }
+  } catch { /* ignore — engine may be unreachable */ }
+}
+
 leEl('le-connect-btn').addEventListener('click', leConnect);
 leEl('le-disconnect-btn').addEventListener('click', leDisconnect);
 leEl('le-delete-drafts-btn').addEventListener('click', leDeleteDrafts);
+leEl('le-refresh-published-btn').addEventListener('click', leLoadPublished);
 </script>
 
 </body>

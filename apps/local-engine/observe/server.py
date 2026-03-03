@@ -4,6 +4,7 @@ Endpoints:
     GET /health         — liveness probe
     GET /status         — JSON snapshot of current run state + DB stats
     GET /stream         — SSE event stream (text/event-stream)
+    GET /published      — recent published stories from local SQLite
     DELETE /drafts      — delete all draft stories from local SQLite
 
 Start via: asyncio.create_task(start_server(settings, bus, db_path))
@@ -133,6 +134,28 @@ async def handle_stream(request: Request) -> StreamResponse:
     return resp
 
 
+async def handle_published(request: Request) -> Response:
+    """GET /published — recent published stories from local SQLite."""
+    db_path: str = request.app["db_path"]
+    try:
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT s.story_id, s.title_ru, s.category, s.last_update_at,"
+                "       p.fb_status, p.fb_post_id, p.fb_attempts, p.fb_posted_at,"
+                "       p.fb_error_last"
+                " FROM stories s"
+                " LEFT JOIN publications p ON s.story_id = p.story_id"
+                " WHERE s.state = 'published'"
+                " ORDER BY s.last_update_at DESC LIMIT 50"
+            ) as cur:
+                rows = [dict(r) for r in await cur.fetchall()]
+        return _json({"ok": True, "stories": rows})
+    except Exception as exc:
+        return _json({"ok": False, "error": str(exc)}, status=500)
+
+
 async def handle_delete_drafts(request: Request) -> Response:
     """DELETE /drafts — remove all draft stories from the local SQLite database."""
     db_path: str = request.app["db_path"]
@@ -175,6 +198,7 @@ async def start_server(settings: "Settings", db_path: str) -> None:
     app.router.add_get("/health", handle_health)
     app.router.add_get("/status", handle_status)
     app.router.add_get("/stream", handle_stream)
+    app.router.add_get("/published", handle_published)
     app.router.add_route("DELETE", "/drafts", handle_delete_drafts)
     app.router.add_route("OPTIONS", "/{path_info:.*}", handle_options)
 
