@@ -203,6 +203,43 @@ function fmtTime(iso: string): string {
 <!-- Toast notification -->
 <div id="toast"></div>
 
+<!-- ── Local Engine Monitor ── -->
+<div class="section-header" style="margin-top:0">
+  <h2 data-i18n="localEngine">Локальный движок</h2>
+  <div class="section-actions">
+    <input id="le-url" type="text" value="http://localhost:9090"
+      style="width:200px;padding:2px 6px;font-size:0.7rem;font-family:inherit;
+             background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#e6edf3" />
+    <button class="btn btn-action" id="le-connect-btn" data-i18n="leConnect">Подключить</button>
+    <button class="btn btn-neutral" id="le-disconnect-btn" style="display:none" data-i18n="leDisconnect">Отключить</button>
+    <button class="btn btn-danger" id="le-delete-drafts-btn" style="display:none" data-i18n="leDeleteDrafts">Удалить черновики</button>
+  </div>
+</div>
+
+<div id="le-status-bar" style="display:none;margin-bottom:0.5rem">
+  <div class="grid" style="margin-bottom:0.4rem" id="le-counters-grid">
+    <div class="card"><div class="card-label" data-i18n="leEngineStatus">Движок</div><div class="card-value" id="le-engine-status">—</div></div>
+    <div class="card"><div class="card-label" data-i18n="lePhase">Фаза</div><div class="card-value" id="le-phase">—</div></div>
+    <div class="card"><div class="card-label" data-i18n="leElapsed">Время цикла</div><div class="card-value" id="le-elapsed">—</div></div>
+    <div class="card"><div class="card-label" data-i18n="leItemsNew">Новостей</div><div class="card-value" id="le-items-new">—</div></div>
+    <div class="card"><div class="card-label" data-i18n="lePublished">Опубликовано</div><div class="card-value" id="le-published">—</div></div>
+    <div class="card"><div class="card-label" data-i18n="leErrors">Ошибок</div><div class="card-value" id="le-errors">—</div></div>
+  </div>
+  <!-- Phase progress bar -->
+  <div style="margin-bottom:0.5rem;font-size:0.72rem;color:#8b949e">
+    <span id="le-phase-detail"></span>
+  </div>
+  <div style="background:#21262d;border-radius:3px;height:4px;overflow:hidden;margin-bottom:0.75rem">
+    <div id="le-progress-bar" style="height:100%;background:#58a6ff;width:0%;transition:width 0.3s"></div>
+  </div>
+</div>
+
+<div id="le-event-log" style="display:none;background:#0d1117;border:1px solid #21262d;border-radius:4px;
+     padding:0.5rem;height:220px;overflow-y:auto;font-size:0.72rem;font-family:inherit;margin-bottom:0.5rem">
+  <div style="color:#8b949e;font-style:italic" id="le-log-empty" data-i18n="leWaitingEvents">Ожидание событий…</div>
+</div>
+<p id="le-disconnected-notice" class="notice" data-i18n="leNotConnected">Движок не подключён. Введите адрес API и нажмите "Подключить".</p>
+
 <!-- ── Health ── -->
 {health ? (
   <div>
@@ -419,6 +456,32 @@ function fmtTime(iso: string): string {
 
 <script define:vars={{ apiBase, adminToken, draftTotal: draftCounts.total }} is:inline>
 
+// ── Local Engine i18n additions ──────────────────────────────────────────────
+const LE_RU = {
+  localEngine: 'Локальный движок', leConnect: 'Подключить', leDisconnect: 'Отключить',
+  leEngineStatus: 'Движок', lePhase: 'Фаза', leElapsed: 'Время цикла',
+  leItemsNew: 'Новостей', lePublished: 'Опубликовано', leErrors: 'Ошибок',
+  leNotConnected: 'Движок не подключён. Введите адрес API и нажмите "Подключить".',
+  leWaitingEvents: 'Ожидание событий…',
+  leDeleteDrafts: 'Удалить черновики',
+  leDeleteDraftsConfirm: (n) => `Удалить ${n !== undefined ? n + ' ' : ''}черновиков из локальной БД?`,
+  leDeleteDraftsOk: (n) => `Удалено ${n} черновиков из локальной БД`,
+  leStatus: { idle: 'ожидание', running: 'работает', sleeping: 'пауза' },
+  lePhases: { ingest: 'Сбор RSS', summary: 'Суммаризация', images: 'Изображения', fb: 'Facebook', sync: 'Синхронизация' },
+};
+const LE_EN = {
+  localEngine: 'Local Engine', leConnect: 'Connect', leDisconnect: 'Disconnect',
+  leEngineStatus: 'Engine', lePhase: 'Phase', leElapsed: 'Cycle time',
+  leItemsNew: 'Items new', lePublished: 'Published', leErrors: 'Errors',
+  leNotConnected: 'Engine not connected. Enter API address and click "Connect".',
+  leWaitingEvents: 'Waiting for events…',
+  leDeleteDrafts: 'Delete local drafts',
+  leDeleteDraftsConfirm: (n) => `Delete ${n !== undefined ? n + ' ' : ''}drafts from local DB?`,
+  leDeleteDraftsOk: (n) => `Deleted ${n} drafts from local DB`,
+  leStatus: { idle: 'idle', running: 'running', sleeping: 'sleeping' },
+  lePhases: { ingest: 'RSS Ingest', summary: 'Summarisation', images: 'Images', fb: 'Facebook', sync: 'CF Sync' },
+};
+
 // ── i18n ────────────────────────────────────────────────────────────────────
 const STRINGS = {
   ru: {
@@ -463,6 +526,7 @@ const STRINGS = {
     toastErr: (msg) => `Ошибка: ${msg}`,
     noErrors: 'Нет ошибок для этого запуска.',
     errLoad: 'Ошибка загрузки.',
+    ...LE_RU,
   },
   en: {
     health: 'Service Health', service: 'Service', environment: 'Environment',
@@ -504,6 +568,7 @@ const STRINGS = {
     toastErr: (msg) => `Error: ${msg}`,
     noErrors: 'No errors for this run.',
     errLoad: 'Failed to load errors.',
+    ...LE_EN,
   },
 };
 
@@ -763,6 +828,237 @@ document.getElementById('trigger-cron-btn').addEventListener('click', async () =
 
 // ── Page refresh ──────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', () => window.location.reload());
+
+// ── Local Engine SSE monitor ──────────────────────────────────────────────────
+let leEventSource = null;
+let leCycleStart = 0;
+let leElapsedTimer = null;
+const PHASE_PROGRESS = { ingest: 20, summary: 70, images: 85, fb: 95, sync: 100 };
+
+function leEl(id) { return document.getElementById(id); }
+
+function leLog(html, color) {
+  const log = leEl('le-event-log');
+  const empty = leEl('le-log-empty');
+  if (empty) empty.style.display = 'none';
+  const div = document.createElement('div');
+  div.style.cssText = `padding:2px 0;border-bottom:1px solid #21262d;color:${color || '#c9d1d9'}`;
+  div.innerHTML = html;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function leSetStatus(engineStatus) {
+  const strings = STRINGS[lang];
+  const statusMap = strings.leStatus || {};
+  const el = leEl('le-engine-status');
+  if (!el) return;
+  el.textContent = statusMap[engineStatus] || engineStatus;
+  el.style.color = engineStatus === 'running' ? '#3fb950' : engineStatus === 'sleeping' ? '#e3b341' : '#8b949e';
+}
+
+function leSetPhase(phase) {
+  const strings = STRINGS[lang];
+  const phaseMap = strings.lePhases || {};
+  const el = leEl('le-phase');
+  if (!el) return;
+  el.textContent = phase ? (phaseMap[phase] || phase) : '—';
+  const pct = PHASE_PROGRESS[phase] || 0;
+  leEl('le-progress-bar').style.width = pct + '%';
+}
+
+function leUpdateCounters(counters) {
+  if (!counters) return;
+  const setVal = (id, v) => { const el = leEl(id); if (el) el.textContent = v; };
+  setVal('le-items-new', counters.items_new ?? '—');
+  setVal('le-published', counters.published_web ?? '—');
+  const errEl = leEl('le-errors');
+  if (errEl) {
+    errEl.textContent = counters.errors_total ?? '—';
+    errEl.style.color = (counters.errors_total || 0) > 0 ? '#f85149' : '';
+  }
+}
+
+function leStartElapsedTimer() {
+  if (leElapsedTimer) clearInterval(leElapsedTimer);
+  leCycleStart = Date.now();
+  leElapsedTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - leCycleStart) / 1000);
+    const el = leEl('le-elapsed');
+    if (el) el.textContent = `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;
+  }, 1000);
+}
+
+function leStopElapsedTimer() {
+  if (leElapsedTimer) { clearInterval(leElapsedTimer); leElapsedTimer = null; }
+}
+
+function leHandleEvent(ev) {
+  const type = ev.type;
+  const data = ev.data || {};
+  const phase = ev.phase;
+  const strings = STRINGS[lang];
+  const phaseMap = strings.lePhases || {};
+
+  if (type === 'heartbeat') return; // silent
+
+  if (type === 'cycle_start') {
+    leStartElapsedTimer();
+    leSetStatus('running');
+    leSetPhase(null);
+    leEl('le-progress-bar').style.width = '5%';
+    leLog(`▶ <b>Цикл запущен</b> — run_id: ${data.run_id || '?'}, источников: ${data.sources_count || '?'}`, '#58a6ff');
+  } else if (type === 'cycle_done') {
+    leStopElapsedTimer();
+    leSetStatus('idle');
+    leSetPhase(null);
+    leEl('le-progress-bar').style.width = '100%';
+    setTimeout(() => { leEl('le-progress-bar').style.width = '0%'; }, 2000);
+    const status = data.status || '?';
+    const color = status === 'success' ? '#3fb950' : status === 'partial_failure' ? '#e3b341' : '#f85149';
+    const elapsed = data.elapsed_ms ? `${(data.elapsed_ms/1000).toFixed(0)}с` : '';
+    leLog(`■ <b>Цикл завершён</b> — ${status} ${elapsed}`, color);
+    if (data.counters) leUpdateCounters(data.counters);
+  } else if (type === 'sleeping') {
+    leStopElapsedTimer();
+    leSetStatus('sleeping');
+    leSetPhase(null);
+    leEl('le-elapsed').textContent = '—';
+    leLog(`⏸ Пауза ${data.seconds || '?'}с, следующий цикл: ${data.next_cycle_at ? data.next_cycle_at.slice(11,16) + ' UTC' : '?'}`, '#8b949e');
+  } else if (type === 'phase_start') {
+    leSetPhase(phase);
+    leLog(`  → <b>${phaseMap[phase] || phase}</b>`, '#58a6ff');
+  } else if (type === 'phase_done') {
+    const ms = data.elapsed_ms ? `${(data.elapsed_ms/1000).toFixed(1)}с` : '';
+    const err = data.error ? ` ⚠ ${data.error}` : '';
+    leLog(`  ✓ ${phaseMap[phase] || phase} ${ms}${err}`, data.error ? '#f85149' : '#8b949e');
+  } else if (type === 'source_ok') {
+    leLog(`    ✓ ${data.source}: +${data.new || 0} новых`, '#3fb950');
+  } else if (type === 'source_fail') {
+    leLog(`    ✗ ${data.source}: ${data.error || '?'}`, '#f85149');
+  } else if (type === 'source_skip') {
+    leLog(`    · ${data.source}: пропущен (${data.reason || ''})`, '#8b949e');
+  } else if (type === 'story_processing') {
+    leEl('le-phase-detail').textContent = `${phaseMap['summary'] || 'Summary'} ${data.idx}/${data.total}`;
+    // Update progress within summary phase (20–70%)
+    const pct = 20 + Math.round((data.idx / Math.max(data.total, 1)) * 50);
+    leEl('le-progress-bar').style.width = pct + '%';
+    leLog(`    ⚙ История ${data.idx}/${data.total} — ${data.story_id || ''}`, '#8b949e');
+  } else if (type === 'story_ok') {
+    leUpdateCounters({ published_web: (parseInt(leEl('le-published').textContent) || 0) + 1 });
+    leLog(`    ✓ ${data.title_ru || data.story_id || ''}`, '#3fb950');
+  } else if (type === 'story_fail') {
+    leLog(`    ✗ ${data.story_id || ''}: ${data.error || '?'}`, '#f85149');
+  } else if (type === 'story_skip') {
+    leLog(`    · ${data.story_id || ''}: пропущен (${data.reason || ''})`, '#8b949e');
+  } else if (type === 'image_ok') {
+    leLog(`    ✓ Изображение: ${data.story_id || ''}`, '#8b949e');
+  } else if (type === 'image_fail') {
+    leLog(`    ✗ Изображение: ${data.story_id || ''}`, '#f85149');
+  } else if (type === 'fb_posted') {
+    leLog(`    ✓ FB пост: ${data.story_id || ''} ${data.post_id ? '#'+data.post_id : ''}`, '#3fb950');
+  } else if (type === 'fb_fail') {
+    leLog(`    ✗ FB ошибка: ${data.story_id || ''} — ${data.error || '?'}`, '#f85149');
+  } else if (type === 'fb_rate_limited') {
+    leLog(`    ⏱ FB rate limit`, '#e3b341');
+  } else if (type === 'sync_done') {
+    leLog(`    ↑ Синхронизировано: ${data.pushed || 0} историй`, '#58a6ff');
+  } else if (type === 'engine_start') {
+    leLog(`● Движок запущен (режим: ${data.mode || '?'})`, '#58a6ff');
+  } else if (type === 'engine_stop') {
+    leStopElapsedTimer();
+    leSetStatus('idle');
+    leLog(`● Движок остановлен (${data.reason || '?'})`, '#8b949e');
+  } else if (type === 'cycle_starting') {
+    leSetStatus('running');
+    leLog(`▷ Цикл #${data.cycle || '?'} запускается…`, '#58a6ff');
+  }
+}
+
+async function leConnect() {
+  if (leEventSource) { leEventSource.close(); leEventSource = null; }
+
+  const url = (leEl('le-url').value || 'http://localhost:9090').replace(/\/$/, '');
+
+  // Quick health check first
+  try {
+    const resp = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    if (!json.ok) throw new Error('Engine returned ok:false');
+  } catch (err) {
+    toast(`Движок недоступен: ${err.message}`, 'err');
+    return;
+  }
+
+  // Show UI
+  leEl('le-connect-btn').style.display = 'none';
+  leEl('le-disconnect-btn').style.display = '';
+  leEl('le-delete-drafts-btn').style.display = '';
+  leEl('le-disconnected-notice').style.display = 'none';
+  leEl('le-status-bar').style.display = '';
+  leEl('le-event-log').style.display = '';
+  leEl('le-log-empty').style.display = '';
+
+  // Fetch initial status
+  try {
+    const resp = await fetch(`${url}/status`);
+    const json = await resp.json();
+    if (json.ok && json.state) {
+      leSetStatus(json.state.engine_status);
+      leSetPhase(json.state.phase);
+      leUpdateCounters(json.state.counters);
+      if (json.state.engine_status === 'running' && json.state.cycle_elapsed_sec) {
+        leCycleStart = Date.now() - json.state.cycle_elapsed_sec * 1000;
+        leStartElapsedTimer();
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Open SSE stream
+  leEventSource = new EventSource(`${url}/stream`);
+  leEventSource.onmessage = (e) => {
+    try { leHandleEvent(JSON.parse(e.data)); } catch { /* ignore malformed */ }
+  };
+  leEventSource.onerror = () => {
+    leLog('⚠ SSE соединение прервано', '#e3b341');
+    leSetStatus('idle');
+  };
+  toast('Движок подключён', 'ok');
+}
+
+function leDisconnect() {
+  if (leEventSource) { leEventSource.close(); leEventSource = null; }
+  leStopElapsedTimer();
+  leEl('le-connect-btn').style.display = '';
+  leEl('le-disconnect-btn').style.display = 'none';
+  leEl('le-delete-drafts-btn').style.display = 'none';
+  leEl('le-status-bar').style.display = 'none';
+  leEl('le-event-log').style.display = 'none';
+  leEl('le-disconnected-notice').style.display = '';
+}
+
+async function leDeleteDrafts() {
+  const url = (leEl('le-url').value || 'http://localhost:9090').replace(/\/$/, '');
+  const S = STRINGS[lang];
+  if (!confirm(S.leDeleteDraftsConfirm())) return;
+  try {
+    const resp = await fetch(`${url}/drafts`, { method: 'DELETE' });
+    const json = await resp.json();
+    if (json.ok) {
+      toast(S.leDeleteDraftsOk(json.deleted), 'ok');
+      leLog(`🗑 ${S.leDeleteDraftsOk(json.deleted)}`, '#e3b341');
+    } else {
+      toast(`Ошибка: ${json.error || '?'}`, 'err');
+    }
+  } catch (err) {
+    toast(`Ошибка: ${err.message}`, 'err');
+  }
+}
+
+leEl('le-connect-btn').addEventListener('click', leConnect);
+leEl('le-disconnect-btn').addEventListener('click', leDisconnect);
+leEl('le-delete-drafts-btn').addEventListener('click', leDeleteDrafts);
 </script>
 
 </body>

@@ -39,8 +39,10 @@ from db.repos.source_state_repo import mark_failure, mark_success, should_fetch
 from images.cache import ImageCacheManager
 from images.og_parser import extract_og_image
 from ingest.rss import fetch_rss
+from observe.events import BUS, EventBus
 from observe.logger import configure_logging, get_logger
 from observe.metrics import MetricsRecorder
+from observe.server import start_server
 from publish.facebook import FacebookClient
 from publish.queue import PublishQueueManager
 from sources.models import Source
@@ -63,13 +65,16 @@ async def _phase_ingest(
     counters: RunCounters,
     log,
     metrics: MetricsRecorder,
+    bus: EventBus,
 ) -> None:
     """Fetch RSS feeds and cluster new items into stories."""
     t0 = time.monotonic()
+    await bus.emit("phase_start", {"total": len(sources)}, phase="ingest")
 
     for source in sources:
         if not await should_fetch(db, source.id, source.throttle.min_interval_sec):
             log.debug("source_skipped", source=source.id, reason="throttle")
+            await bus.emit("source_skip", {"source": source.id, "reason": "throttle"}, phase="ingest")
             continue
 
         try:
@@ -81,12 +86,10 @@ async def _phase_ingest(
             counters.items_found += result.found
             counters.items_new += result.inserted
 
-            log.info(
-                "source_ok",
-                source=source.id,
-                found=result.found,
-                new=result.inserted,
-            )
+            stories_new = 0
+            stories_updated = 0
+
+            log.info("source_ok", source=source.id, found=result.found, new=result.inserted)
 
             # Cluster only items that were genuinely new this run
             if result.new_keys:
@@ -104,6 +107,8 @@ async def _phase_ingest(
                     cc = await cluster_new_items(db, cluster_items)
                     counters.stories_new += cc.stories_new
                     counters.stories_updated += cc.stories_updated
+                    stories_new = cc.stories_new
+                    stories_updated = cc.stories_updated
                     log.info(
                         "cluster_ok",
                         source=source.id,
@@ -111,12 +116,21 @@ async def _phase_ingest(
                         stories_updated=cc.stories_updated,
                     )
 
+            await bus.emit("source_ok", {
+                "source": source.id,
+                "found": result.found,
+                "new": result.inserted,
+                "stories_new": stories_new,
+                "stories_updated": stories_updated,
+            }, phase="ingest")
+
         except Exception as exc:
             await mark_failure(db, source.id)
             counters.sources_failed += 1
             counters.errors_total += 1
             await record_error(db, run_id, "ingest", source.id, None, str(exc))
             log.warning("source_error", source=source.id, error=str(exc))
+            await bus.emit("source_fail", {"source": source.id, "error": str(exc)}, phase="ingest")
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     await metrics.record(db, "ingest", "sources_ok", counters.sources_ok)
@@ -125,6 +139,11 @@ async def _phase_ingest(
     await metrics.record(db, "ingest", "duration_ms", elapsed_ms)
     await metrics.record(db, "cluster", "stories_new", counters.stories_new)
     await metrics.record(db, "cluster", "stories_updated", counters.stories_updated)
+    await bus.emit("phase_done", {
+        "phase": "ingest", "elapsed_ms": elapsed_ms,
+        "sources_ok": counters.sources_ok, "sources_failed": counters.sources_failed,
+        "items_new": counters.items_new, "stories_new": counters.stories_new,
+    }, phase="ingest")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +159,7 @@ async def _phase_summary(
     counters: RunCounters,
     log,
     metrics: MetricsRecorder,
+    bus: EventBus,
 ) -> None:
     """Generate Russian summaries for draft stories via Ollama.
 
@@ -147,6 +167,7 @@ async def _phase_summary(
     RSS client, which has a short 20s timeout unsuitable for LLM generation.
     """
     t0 = time.monotonic()
+    await bus.emit("phase_start", {}, phase="summary")
     try:
         # Ollama needs its own client: generation can take 30–120 s per story.
         async with httpx.AsyncClient(
@@ -169,6 +190,7 @@ async def _phase_summary(
                 target_min=settings.summary_target_min,
                 target_max=settings.summary_target_max,
                 http_client=ollama_http,
+                event_bus=bus,
             )
         counters.published_web += sc.published
         counters.errors_total += sc.failed
@@ -192,11 +214,16 @@ async def _phase_summary(
         await metrics.record(db, "wow_story", "caption_ok", sc.wow_caption_ok)
         await metrics.record(db, "wow_story", "caption_fail", sc.wow_caption_fail)
         await metrics.record(db, "wow_story", "rewrite_attempts", sc.wow_rewrite_attempts)
+        await bus.emit("phase_done", {
+            "phase": "summary", "elapsed_ms": elapsed_ms,
+            "published": sc.published, "failed": sc.failed, "skipped": sc.skipped,
+        }, phase="summary")
 
     except Exception as exc:
         counters.errors_total += 1
         await record_error(db, run_id, "summary", None, None, str(exc))
         log.error("summary_phase_error", error=str(exc))
+        await bus.emit("phase_done", {"phase": "summary", "error": str(exc)}, phase="summary")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,9 +237,11 @@ async def _phase_images(
     log,
     metrics: MetricsRecorder,
     http_client: httpx.AsyncClient,
+    bus: EventBus,
 ) -> None:
     """Download and validate images for published stories (best-effort)."""
     t0 = time.monotonic()
+    await bus.emit("phase_start", {}, phase="images")
     try:
         img_mgr = ImageCacheManager(settings.image_cache_dir)
 
@@ -263,17 +292,24 @@ async def _phase_images(
             if path:
                 downloaded += 1
                 log.debug("image_cached", story_id=row["story_id"], path=path)
+                await bus.emit("image_ok", {"story_id": row["story_id"], "url": image_url}, phase="images")
             else:
                 failed += 1
+                await bus.emit("image_fail", {"story_id": row["story_id"], "url": image_url}, phase="images")
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log.info("images_done", downloaded=downloaded, failed=failed, elapsed_ms=elapsed_ms)
         await metrics.record(db, "images", "downloaded", downloaded)
         await metrics.record(db, "images", "failed", failed)
         await metrics.record(db, "images", "duration_ms", elapsed_ms)
+        await bus.emit("phase_done", {
+            "phase": "images", "elapsed_ms": elapsed_ms,
+            "downloaded": downloaded, "failed": failed,
+        }, phase="images")
 
     except Exception as exc:
         log.error("images_phase_error", error=str(exc))
+        await bus.emit("phase_done", {"phase": "images", "error": str(exc)}, phase="images")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -356,6 +392,7 @@ async def _phase_fb(
     counters: RunCounters,
     log,
     metrics: MetricsRecorder,
+    bus: EventBus,
 ) -> None:
     """Process FB publish queue: enqueue new stories, post pending items.
 
@@ -365,6 +402,7 @@ async def _phase_fb(
       - Processes at most fb_proof_max_posts_per_run items
     """
     t0 = time.monotonic()
+    await bus.emit("phase_start", {}, phase="fb")
     try:
         fb_client = FacebookClient(
             page_id=settings.fb_page_id,
@@ -408,11 +446,23 @@ async def _phase_fb(
         await metrics.record(db, "fb", "failed", fc.failed)
         await metrics.record(db, "fb", "rate_limited", fc.rate_limited)
         await metrics.record(db, "fb", "duration_ms", elapsed_ms)
+        # Emit individual fb events based on counters (queue_mgr doesn't surface per-post details)
+        for _ in range(fc.posted):
+            await bus.emit("fb_posted", {"count": fc.posted}, phase="fb")
+        if fc.failed:
+            await bus.emit("fb_fail", {"count": fc.failed}, phase="fb")
+        if fc.rate_limited:
+            await bus.emit("fb_rate_limited", {"count": fc.rate_limited}, phase="fb")
+        await bus.emit("phase_done", {
+            "phase": "fb", "elapsed_ms": elapsed_ms,
+            "posted": fc.posted, "failed": fc.failed, "rate_limited": fc.rate_limited,
+        }, phase="fb")
 
     except Exception as exc:
         counters.errors_total += 1
         await record_error(db, run_id, "fb", None, None, str(exc))
         log.error("fb_phase_error", error=str(exc))
+        await bus.emit("phase_done", {"phase": "fb", "error": str(exc)}, phase="fb")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -427,29 +477,32 @@ async def _phase_sync(
     counters: RunCounters,
     log,
     metrics: MetricsRecorder,
+    bus: EventBus,
 ) -> None:
     """Push published stories to the Cloudflare Worker."""
     t0 = time.monotonic()
+    await bus.emit("phase_start", {}, phase="sync")
     try:
         syncer = CloudflareSync(settings.cf_sync_url, settings.cf_sync_token)
         sc = await syncer.push_stories(db)
         counters.errors_total += sc.failed
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        log.info(
-            "sync_done",
-            pushed=sc.pushed,
-            failed=sc.failed,
-            elapsed_ms=elapsed_ms,
-        )
+        log.info("sync_done", pushed=sc.pushed, failed=sc.failed, elapsed_ms=elapsed_ms)
         await metrics.record(db, "sync", "pushed", sc.pushed)
         await metrics.record(db, "sync", "failed", sc.failed)
         await metrics.record(db, "sync", "duration_ms", elapsed_ms)
+        await bus.emit("sync_done", {"pushed": sc.pushed, "failed": sc.failed}, phase="sync")
+        await bus.emit("phase_done", {
+            "phase": "sync", "elapsed_ms": elapsed_ms,
+            "pushed": sc.pushed, "failed": sc.failed,
+        }, phase="sync")
 
     except Exception as exc:
         counters.errors_total += 1
         await record_error(db, run_id, "sync", None, None, str(exc))
         log.error("sync_phase_error", error=str(exc))
+        await bus.emit("phase_done", {"phase": "sync", "error": str(exc)}, phase="sync")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -463,12 +516,15 @@ async def run_cycle(settings: Settings, sources: list[Source]) -> RunCounters:
     run_id = uuid4().hex
     counters = RunCounters()
     metrics = MetricsRecorder(run_id)
+    bus = BUS
 
     ollama = OllamaClient(
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
         timeout_sec=float(settings.ollama_timeout_sec),
     )
+
+    await bus.emit("cycle_start", {"run_id": run_id[:8], "sources_count": len(sources)})
 
     async with get_db(settings.database_path) as db:
         started_at_ms = await start_run(db, run_id)
@@ -482,27 +538,30 @@ async def run_cycle(settings: Settings, sources: list[Source]) -> RunCounters:
         ) as http:
 
             # ── Phase 1+2: Ingest + Cluster ──────────────────────────────────
-            await _phase_ingest(db, sources, http, run_id, counters, log, metrics)
+            await _phase_ingest(db, sources, http, run_id, counters, log, metrics, bus)
 
             # ── Phase 3: Summary ─────────────────────────────────────────────
-            await _phase_summary(db, settings, ollama, run_id, counters, log, metrics)
+            await _phase_summary(db, settings, ollama, run_id, counters, log, metrics, bus)
 
             # ── Phase 4: Images ──────────────────────────────────────────────
-            await _phase_images(db, settings, log, metrics, http)
+            await _phase_images(db, settings, log, metrics, http, bus)
 
             # ── Phase 5: FB (optional) ───────────────────────────────────────
             if settings.fb_posting_enabled:
-                await _phase_fb(db, settings, run_id, counters, log, metrics)
+                await _phase_fb(db, settings, run_id, counters, log, metrics, bus)
             else:
                 log.debug("fb_skipped", reason="FB_POSTING_ENABLED=false")
+                await bus.emit("phase_done", {"phase": "fb", "skipped": True}, phase="fb")
 
             # ── Phase 6: CF Sync (optional) ──────────────────────────────────
             if settings.cf_sync_enabled:
-                await _phase_sync(db, settings, run_id, counters, log, metrics)
+                await _phase_sync(db, settings, run_id, counters, log, metrics, bus)
             else:
                 log.debug("sync_skipped", reason="CF_SYNC_ENABLED=false")
+                await bus.emit("phase_done", {"phase": "sync", "skipped": True}, phase="sync")
 
         await finish_run(db, run_id, started_at_ms, counters)
+        elapsed_total_ms = int(time.time() * 1000) - started_at_ms
         log.info(
             "cycle_done",
             run_id=run_id[:8],
@@ -515,6 +574,26 @@ async def run_cycle(settings: Settings, sources: list[Source]) -> RunCounters:
             fb_posts=counters.published_fb,
             errors=counters.errors_total,
         )
+        status = "success" if counters.errors_total == 0 else (
+            "partial_failure" if counters.sources_ok > 0 or counters.published_web > 0
+            else "failure"
+        )
+        await bus.emit("cycle_done", {
+            "run_id": run_id[:8],
+            "status": status,
+            "elapsed_ms": elapsed_total_ms,
+            "counters": {
+                "sources_ok": counters.sources_ok,
+                "sources_failed": counters.sources_failed,
+                "items_found": counters.items_found,
+                "items_new": counters.items_new,
+                "stories_new": counters.stories_new,
+                "stories_updated": counters.stories_updated,
+                "published_web": counters.published_web,
+                "published_fb": counters.published_fb,
+                "errors_total": counters.errors_total,
+            },
+        })
 
     return counters
 
@@ -551,6 +630,7 @@ async def scheduler_loop(settings: Settings) -> None:
     while not stop_event.is_set():
         cycle += 1
         log.info("cycle_starting", cycle=cycle)
+        await BUS.emit("cycle_starting", {"cycle": cycle})
 
         try:
             await run_cycle(settings, enabled)
@@ -562,7 +642,10 @@ async def scheduler_loop(settings: Settings) -> None:
 
         jitter = random.randint(0, settings.scheduler_jitter_sec)
         sleep_sec = settings.scheduler_interval_sec + jitter
+        from datetime import UTC, datetime, timedelta
+        next_at = (datetime.now(UTC) + timedelta(seconds=sleep_sec)).strftime("%Y-%m-%dT%H:%M:%SZ")
         log.info("sleeping", seconds=sleep_sec, next_cycle=cycle + 1)
+        await BUS.emit("sleeping", {"seconds": sleep_sec, "next_cycle_at": next_at, "next_cycle": cycle + 1})
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=float(sleep_sec))
@@ -570,6 +653,7 @@ async def scheduler_loop(settings: Settings) -> None:
             pass  # Normal wake-up after interval
 
     log.info("scheduler_stopped", cycles_completed=cycle)
+    await BUS.emit("engine_stop", {"reason": "shutdown", "cycles_completed": cycle})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -857,14 +941,47 @@ def main() -> None:
     # ── --loop / --daemon: scheduler loop ────────────────────────────────────
     if "--loop" in args or "--daemon" in args:
         log.info("starting_loop_mode")
-        asyncio.run(scheduler_loop(settings))
+
+        async def _run_loop() -> None:
+            await BUS.emit("engine_start", {"mode": "loop"})
+            if settings.local_api_enabled:
+                server_task = asyncio.create_task(
+                    start_server(settings, settings.database_path)
+                )
+                log.info("local_api_started", port=settings.local_api_port)
+            else:
+                server_task = None
+            try:
+                await scheduler_loop(settings)
+            finally:
+                if server_task:
+                    server_task.cancel()
+
+        asyncio.run(_run_loop())
     else:
         # ── default / --once: single cycle ───────────────────────────────────
         log.info("starting_once_mode")
         srcs = load_sources(settings.sources_registry_path)
         enabled = get_enabled_sources(srcs)
         log.info("sources_loaded", total=len(enabled))
-        asyncio.run(run_cycle(settings, enabled))
+
+        async def _run_once() -> None:
+            await BUS.emit("engine_start", {"mode": "once"})
+            if settings.local_api_enabled:
+                server_task = asyncio.create_task(
+                    start_server(settings, settings.database_path)
+                )
+                log.info("local_api_started", port=settings.local_api_port)
+            else:
+                server_task = None
+            try:
+                await run_cycle(settings, enabled)
+                await BUS.emit("engine_stop", {"reason": "once_complete"})
+            finally:
+                if server_task:
+                    server_task.cancel()
+
+        asyncio.run(_run_once())
 
 
 if __name__ == "__main__":

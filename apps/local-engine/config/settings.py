@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     log_format: str = Field(default="json")  # json | text
     log_file: str = Field(default="data/logs/engine.jsonl")
 
+    # --- Local API server (HTTP + SSE monitoring) ---
+    local_api_port: int = Field(default=9090, ge=1024, le=65535)
+    local_api_enabled: bool = Field(default=True)
+
     # --- Environment ---
     service_env: str = Field(default="dev")
 

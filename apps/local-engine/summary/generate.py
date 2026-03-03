@@ -101,6 +101,7 @@ async def run_summary_pipeline(
     target_min: int = 400,
     target_max: int = 700,
     http_client: httpx.AsyncClient | None = None,
+    event_bus: object | None = None,
 ) -> SummaryCounters:
     """Run the full summary pipeline for all pending draft stories.
 
@@ -120,19 +121,38 @@ async def run_summary_pipeline(
     counters = SummaryCounters()
     stories = await get_stories_needing_summary(db, limit=max_summaries)
 
+    # Emit total count so UI can show progress bar
+    if event_bus is not None:
+        await event_bus.emit("phase_start", {"total": len(stories)}, phase="summary")
+
     for idx, story in enumerate(stories):
         counters.attempted += 1
         log.info("story_processing", idx=idx + 1, total=len(stories), story_id=story.story_id[:12])
+        if event_bus is not None:
+            await event_bus.emit("story_processing", {
+                "story_id": story.story_id[:8],
+                "idx": idx + 1,
+                "total": len(stories),
+                "title_sample": None,  # title_he not available on story row here
+            }, phase="summary")
         try:
             items = await get_story_items_for_summary(db, story.story_id)
             if not items:
                 counters.skipped += 1
+                if event_bus is not None:
+                    await event_bus.emit("story_skip", {
+                        "story_id": story.story_id[:8], "reason": "no_items",
+                    }, phase="summary")
                 continue
 
             # Memoization: skip if this exact content was already summarised.
             new_hash = _memoization_hash([i.item_id for i in items], story.risk_level)
             if story.summary_hash == new_hash:
                 counters.skipped += 1
+                if event_bus is not None:
+                    await event_bus.emit("story_skip", {
+                        "story_id": story.story_id[:8], "reason": "memoized",
+                    }, phase="summary")
                 continue
 
             # ── Pass 0: Build prompts and call Ollama (5-section format) ─────
@@ -214,6 +234,12 @@ async def run_summary_pipeline(
                 fb_caption=fb_caption,
             )
             counters.published += 1
+            if event_bus is not None:
+                await event_bus.emit("story_ok", {
+                    "story_id": story.story_id[:8],
+                    "title_ru": parsed.title,
+                    "category": category,
+                }, phase="summary")
 
         except Exception as exc:
             err_msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
@@ -221,5 +247,9 @@ async def run_summary_pipeline(
                 db, run_id, "summary", None, story.story_id, err_msg
             )
             counters.failed += 1
+            if event_bus is not None:
+                await event_bus.emit("story_fail", {
+                    "story_id": story.story_id[:8], "error": err_msg,
+                }, phase="summary")
 
     return counters
