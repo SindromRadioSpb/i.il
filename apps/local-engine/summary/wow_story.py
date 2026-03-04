@@ -27,7 +27,7 @@ import httpx
 from summary.fact_extract import ExtractedFacts
 from summary.glossary import apply_glossary
 from summary.guards import GuardResult
-from summary.ollama import OllamaClient
+from summary.llm_provider import LLMProvider
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -386,7 +386,7 @@ def _build_critic_user(
 
 
 async def compose_wow_post(
-    ollama: OllamaClient,
+    ollama: LLMProvider,
     facts: ExtractedFacts,
     *,
     client: httpx.AsyncClient | None = None,

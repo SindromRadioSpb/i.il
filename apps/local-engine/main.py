@@ -48,7 +48,7 @@ from publish.queue import PublishQueueManager
 from sources.models import Source
 from sources.registry import get_enabled_sources, load_sources
 from summary.generate import run_summary_pipeline
-from summary.ollama import OllamaClient
+from summary.llm_provider import LLMProvider, create_llm_provider
 from sync.cf_sync import CloudflareSync
 
 
@@ -154,7 +154,7 @@ async def _phase_ingest(
 async def _phase_summary(
     db,
     settings: Settings,
-    ollama: OllamaClient,
+    ollama: LLMProvider,
     run_id: str,
     counters: RunCounters,
     log,
@@ -171,7 +171,7 @@ async def _phase_summary(
     try:
         # Ollama needs its own client: generation can take 30–120 s per story.
         async with httpx.AsyncClient(
-            timeout=float(settings.ollama_timeout_sec),
+            timeout=float(settings.llm_timeout_sec),
             follow_redirects=False,
         ) as ollama_http:
             # Warmup: ensure the model is loaded into VRAM before the pipeline.
@@ -189,6 +189,8 @@ async def _phase_summary(
                 max_summaries=settings.max_summaries_per_run,
                 target_min=settings.summary_target_min,
                 target_max=settings.summary_target_max,
+                llm_max_retries=settings.llm_max_retries,
+                llm_json_mode=settings.llm_json_mode,
                 http_client=ollama_http,
                 event_bus=bus,
             )
@@ -518,11 +520,7 @@ async def run_cycle(settings: Settings, sources: list[Source]) -> RunCounters:
     metrics = MetricsRecorder(run_id)
     bus = BUS
 
-    ollama = OllamaClient(
-        base_url=settings.ollama_base_url,
-        model=settings.ollama_model,
-        timeout_sec=float(settings.ollama_timeout_sec),
-    )
+    ollama = create_llm_provider(settings)
 
     await bus.emit("cycle_start", {"run_id": run_id[:8], "sources_count": len(sources)})
 
@@ -786,18 +784,15 @@ async def run_health_check(settings: Settings) -> bool:
     except Exception as exc:
         checks.append(("DB", False, str(exc)))
 
-    # 2. Ollama
+    # 2. LLM backend (Ollama or llama.cpp)
     try:
+        provider = create_llm_provider(settings)
+        provider_name = "LlamaCpp" if provider.provider_name == "llamacpp" else "Ollama"
         async with httpx.AsyncClient(timeout=5.0) as c:
-            r = await c.get(f"{settings.ollama_base_url}/api/tags")
-            r.raise_for_status()
-            models = r.json().get("models", [])
-        model_names = [m.get("name", "") for m in models]
-        model_found = any(settings.ollama_model in n for n in model_names)
-        detail = f"reachable, model {'found' if model_found else 'NOT FOUND: ' + settings.ollama_model}"
-        checks.append(("Ollama", True, detail))
+            ok, detail = await provider.healthcheck(client=c)
+        checks.append((provider_name, ok, detail))
     except Exception as exc:
-        checks.append(("Ollama", False, f"unreachable: {exc}"))
+        checks.append(("LLM", False, f"config/unreachable: {exc}"))
 
     # 3. Sources registry
     try:

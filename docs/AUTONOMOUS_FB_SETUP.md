@@ -323,3 +323,30 @@ asyncio.run(report())
 | Бэкофф (ошибка) | до 1 часа | (экспоненциальный) |
 
 Подробнее: [`docs/FB_PUBLISHING_POLICY.md`](FB_PUBLISHING_POLICY.md)
+
+---
+
+## LLM provider for autonomous mode
+
+Before `--proof-fb` / `--loop`, choose LLM backend in `.env`.
+
+For llama.cpp (`llama-server` OpenAI-compatible `/v1`):
+
+```bash
+LLM_PROVIDER=llamacpp
+LLM_BASE_URL=http://localhost:8001/v1
+LLM_MODEL=YOUR_MODEL_ID
+LLM_TIMEOUT_SEC=300
+LLM_MAX_RETRIES=2
+LLM_JSON_MODE=strict
+MAX_SUMMARIES_PER_RUN=10
+```
+
+Run checks before enabling autonomous posting:
+
+```bash
+python main.py --health
+python main.py --proof-fb
+```
+
+If health reports `model NOT FOUND`, align `LLM_MODEL` with `/v1/models` output.

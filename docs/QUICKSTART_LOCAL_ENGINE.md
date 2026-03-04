@@ -386,3 +386,28 @@ FB_PAGE_ACCESS_TOKEN=ваш_long_lived_token
 5. **Settings:** If task is already running → **Do not start a new instance**
 
 Подробнее: [`docs/OPS_RUNBOOK_FULL_LOCAL.md`](OPS_RUNBOOK_FULL_LOCAL.md)
+
+---
+
+## LLM backend switch (`llamacpp`)
+
+Local-engine now supports provider selection via `.env`:
+
+```bash
+LLM_PROVIDER=llamacpp
+LLM_BASE_URL=http://localhost:8001/v1
+LLM_MODEL=YOUR_MODEL_ID
+LLM_TIMEOUT_SEC=300
+LLM_MAX_RETRIES=2
+LLM_JSON_MODE=strict
+MAX_SUMMARIES_PER_RUN=10
+```
+
+Verification commands:
+
+```bash
+python main.py --health
+python main.py --proof-fb
+```
+
+See full guide: `docs/LLM_BACKEND_LLAMA_CPP.md`.

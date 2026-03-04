@@ -250,3 +250,64 @@ async def test_extract_facts_minimal_json():
     assert facts.numbers == []
     assert facts.story_url == "https://example.com/s1"
     assert facts.risk_level == "medium"
+
+async def test_extract_facts_retries_with_strict_json_instruction_on_invalid_json():
+    items = [_make_item("?????")]
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.chat = AsyncMock(side_effect=["not-json", _VALID_FACTS_JSON])
+
+    facts = await extract_facts(
+        ollama,
+        items,
+        "https://example.com/s1",
+        "low",
+        max_retries=1,
+        json_mode="strict",
+    )
+
+    assert facts is not None
+    assert facts.story_url == "https://example.com/s1"
+    assert ollama.chat.await_count == 2
+
+    first_call = ollama.chat.await_args_list[0]
+    second_call = ollama.chat.await_args_list[1]
+    assert "Return ONLY valid JSON" not in first_call.args[0]
+    assert "Return ONLY valid JSON" in second_call.args[0]
+
+
+async def test_extract_facts_best_effort_accepts_json_with_prose_without_retry():
+    items = [_make_item("?????")]
+    mixed = f"before\n{_VALID_FACTS_JSON}\nafter"
+    ollama = _make_ollama(mixed)
+
+    facts = await extract_facts(
+        ollama,
+        items,
+        "https://example.com/s1",
+        "low",
+        max_retries=2,
+        json_mode="best_effort",
+    )
+
+    assert facts is not None
+    assert ollama.chat.await_count == 1
+
+
+async def test_extract_facts_strict_uses_extractor_on_last_attempt_only():
+    items = [_make_item("?????")]
+    mixed = f"before\n{_VALID_FACTS_JSON}\nafter"
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.chat = AsyncMock(side_effect=[mixed, mixed])
+
+    facts = await extract_facts(
+        ollama,
+        items,
+        "https://example.com/s1",
+        "low",
+        max_retries=1,
+        json_mode="strict",
+    )
+
+    assert facts is not None
+    assert ollama.chat.await_count == 2
+

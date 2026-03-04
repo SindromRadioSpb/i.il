@@ -1,7 +1,7 @@
 """summary/fact_extract.py — Pass 1: Extract structured facts from Hebrew titles.
 
-Calls Ollama once and returns a validated ExtractedFacts pydantic model.
-Returns None on any failure — callers treat this as best-effort.
+Calls LLM provider and returns a validated ExtractedFacts pydantic model.
+Returns None on failure — callers treat this as best-effort.
 
 The model is the single source of truth passed to the WOW-story composer:
 no prose is invented, every field is grounded in source input.
@@ -10,12 +10,12 @@ no prose is invented, every field is grounded in source input.
 from __future__ import annotations
 
 import json
-import re
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from summary.ollama import OllamaClient
+from summary.json_utils import build_json_retry_instruction, parse_json_output
+from summary.llm_provider import LLMProvider
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ class ExtractedFacts(BaseModel):
     claims: list[str] = Field(default_factory=list)    # facts explicitly in titles
     uncertainty_notes: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
-    risk_level: str = "low"          # low|medium|high  (caller-controlled)
+    risk_level: str = "low"          # low|medium|high (caller-controlled)
     story_url: str = ""              # caller-controlled — passed verbatim to post
 
 
@@ -49,23 +49,31 @@ _VALID_EVENT_TYPES: frozenset[str] = frozenset(
 _VALID_RISK_LEVELS: frozenset[str] = frozenset(["low", "medium", "high"])
 
 
+_JSON_RETRY_SUFFIX = build_json_retry_instruction()
+
+
 def _coerce_facts(data: dict, story_url: str, risk_level: str) -> ExtractedFacts:
     """Validate and coerce raw dict into ExtractedFacts, clamping enum values."""
     # Normalise event_type
     et = str(data.get("event_type", "other")).lower()
     data["event_type"] = et if et in _VALID_EVENT_TYPES else "other"
+
     # Always use caller-supplied values — never trust LLM output for these
+    rl = str(risk_level).lower()
     data["story_url"] = story_url
-    data["risk_level"] = risk_level
+    data["risk_level"] = rl if rl in _VALID_RISK_LEVELS else "low"
+
     # Ensure list fields are actual lists
     for key in ("actors", "numbers", "claims", "uncertainty_notes", "sources"):
         val = data.get(key)
         if not isinstance(val, list):
             data[key] = [str(val)] if val else []
+
     # Ensure string-or-null fields
     for key in ("location", "time_ref"):
         val = data.get(key)
         data[key] = str(val).strip() if val else None
+
     return ExtractedFacts.model_validate(data)
 
 
@@ -125,30 +133,19 @@ def _build_fact_user(items: list, story_url: str, risk_level: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JSON extraction helper
+# JSON extraction helper (public for tests)
 # ─────────────────────────────────────────────────────────────────────────────
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)\s*```", re.IGNORECASE)
 
 
 def extract_json_from_text(raw: str) -> dict:
     """Extract the first JSON object from raw LLM output.
 
-    Handles both bare JSON and ```json ... ``` fenced blocks.
-    Raises ValueError if no valid JSON object is found.
+    Handles bare JSON, fenced JSON, and leading/trailing prose.
     """
-    # Try fenced code block first
-    m = _JSON_BLOCK_RE.search(raw)
-    if m:
-        return json.loads(m.group(1))
-
-    # Try bare JSON: find outermost { ... }
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start >= 0 and end > start:
-        return json.loads(raw[start:end])
-
-    raise ValueError(f"No JSON object found in LLM output: {raw[:200]!r}")
+    data = parse_json_output(raw, allow_extractor=True)
+    if not isinstance(data, dict):
+        raise ValueError("Expected JSON object")
+    return data
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,22 +154,51 @@ def extract_json_from_text(raw: str) -> dict:
 
 
 async def extract_facts(
-    ollama: OllamaClient,
+    llm: LLMProvider,
     items: list,
     story_url: str,
     risk_level: str = "low",
     *,
     client: httpx.AsyncClient | None = None,
+    max_retries: int = 2,
+    json_mode: str = "strict",
 ) -> ExtractedFacts | None:
-    """Call Ollama Pass-1 and return validated ExtractedFacts, or None on failure.
+    """Return validated ExtractedFacts, or None on failure.
 
-    Never raises — failures are silently absorbed.
-    story_url and risk_level are always set from caller, not from LLM output.
+    Retry strategy:
+      1) direct parse (json.loads)
+      2) extractor fallback (best_effort, or last attempt in strict mode)
+      3) pydantic validation; retry with stronger JSON instruction on failure
     """
     user = _build_fact_user(items, story_url, risk_level)
-    try:
-        raw = await ollama.chat(_FACT_SYSTEM, user, client=client, format="json")
-        data = extract_json_from_text(raw)
-        return _coerce_facts(data, story_url, risk_level)
-    except Exception:
-        return None
+    attempts = max(0, int(max_retries)) + 1
+    mode = json_mode.strip().lower()
+    best_effort = mode == "best_effort"
+
+    for attempt in range(attempts):
+        system = _FACT_SYSTEM
+        if attempt > 0:
+            system = f"{_FACT_SYSTEM}\n\n{_JSON_RETRY_SUFFIX}"
+
+        try:
+            raw = await llm.chat(system, user, client=client, format="json")
+        except Exception:
+            continue
+
+        allow_extractor = best_effort or (attempt == attempts - 1)
+        try:
+            parsed = parse_json_output(raw, allow_extractor=allow_extractor)
+        except (ValueError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(parsed, dict):
+            continue
+
+        try:
+            return _coerce_facts(parsed, story_url, risk_level)
+        except ValidationError:
+            continue
+        except Exception:
+            continue
+
+    return None

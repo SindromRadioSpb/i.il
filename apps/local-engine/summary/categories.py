@@ -1,8 +1,7 @@
-"""summary/categories.py — Auto-category classification and hashtag generation via Ollama.
+"""summary/categories.py — Auto-category classification and hashtag generation.
 
-New functionality for the local engine (not in TS Worker).
 Runs after a successful summary to enrich stories with category + hashtags.
-Failures are silently swallowed — categories/hashtags are best-effort.
+Failures are best-effort and never block publish.
 """
 
 from __future__ import annotations
@@ -11,14 +10,17 @@ import json
 import re
 
 import httpx
+from pydantic import BaseModel, Field, ValidationError
 
-from summary.ollama import OllamaClient
+from summary.json_utils import build_json_retry_instruction, parse_json_output
+from summary.llm_provider import LLMProvider
 
 VALID_CATEGORIES: frozenset[str] = frozenset(
     ["politics", "security", "economy", "society", "other"]
 )
 
 _HASHTAG_RE = re.compile(r"#\w+")
+_JSON_RETRY_SUFFIX = build_json_retry_instruction()
 
 _COMBINED_SYSTEM = (
     "Ты помощник-редактор новостей. По заголовку и тексту определи категорию и создай хештеги.\n"
@@ -28,58 +30,128 @@ _COMBINED_SYSTEM = (
 )
 
 
+class _CategoryTagResponse(BaseModel):
+    category: str = "other"
+    hashtags: list[str] = Field(default_factory=list)
+
+
+def _coerce_category_and_tags(data: dict) -> tuple[str, list[str]]:
+    """Validate and normalize LLM JSON payload."""
+    payload = _CategoryTagResponse.model_validate(data)
+
+    category = payload.category.lower().strip()
+    if category not in VALID_CATEGORIES:
+        category = "other"
+
+    hashtags: list[str] = []
+    for raw in payload.hashtags:
+        txt = str(raw).strip()
+        if not txt:
+            continue
+        if not txt.startswith("#"):
+            txt = f"#{txt.lstrip('#')}"
+        if _HASHTAG_RE.fullmatch(txt):
+            hashtags.append(txt)
+
+    # Keep only first 5 tags; preserve order and uniqueness.
+    deduped: list[str] = []
+    for h in hashtags:
+        if h not in deduped:
+            deduped.append(h)
+        if len(deduped) >= 5:
+            break
+
+    return category, deduped
+
+
 async def classify_and_tag(
-    ollama: OllamaClient,
+    llm: LLMProvider,
     title_ru: str,
     summary_ru: str,
     client: httpx.AsyncClient | None = None,
+    *,
+    max_retries: int = 2,
+    json_mode: str = "strict",
 ) -> tuple[str, list[str]]:
-    """Return (category, hashtags) for a published story in one Ollama call.
+    """Return (category, hashtags) via a single LLM call.
 
-    Returns ("other", []) on any error.
+    Parsing strategy mirrors fact_extract:
+      - direct JSON parse first
+      - extractor fallback (best_effort, or final strict attempt)
+      - pydantic validation
     """
-    try:
-        user = f"Заголовок: {title_ru}\n\n{summary_ru[:300]}"
-        raw = await ollama.chat(_COMBINED_SYSTEM, user, client=client, format="json")
-        data = json.loads(raw)
-        category = str(data.get("category", "other")).lower().strip()
-        if category not in VALID_CATEGORIES:
-            category = "other"
-        hashtags_raw = data.get("hashtags", [])
-        if isinstance(hashtags_raw, list):
-            hashtags = [h for h in hashtags_raw if isinstance(h, str) and h.startswith("#")][:5]
-        else:
-            hashtags = _HASHTAG_RE.findall(str(hashtags_raw))[:5]
-        return category, hashtags
-    except Exception:
-        return "other", []
+    user = f"Заголовок: {title_ru}\n\n{summary_ru[:300]}"
+    attempts = max(0, int(max_retries)) + 1
+    mode = json_mode.strip().lower()
+    best_effort = mode == "best_effort"
+
+    for attempt in range(attempts):
+        system = _COMBINED_SYSTEM
+        if attempt > 0:
+            system = f"{_COMBINED_SYSTEM}\n\n{_JSON_RETRY_SUFFIX}"
+
+        try:
+            raw = await llm.chat(system, user, client=client, format="json")
+        except Exception:
+            continue
+
+        allow_extractor = best_effort or (attempt == attempts - 1)
+        try:
+            parsed = parse_json_output(raw, allow_extractor=allow_extractor)
+        except (ValueError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(parsed, dict):
+            continue
+
+        try:
+            return _coerce_category_and_tags(parsed)
+        except ValidationError:
+            continue
+        except Exception:
+            continue
+
+    return "other", []
 
 
 async def classify_category(
-    ollama: OllamaClient,
+    llm: LLMProvider,
     title_ru: str,
     summary_ru: str,
     client: httpx.AsyncClient | None = None,
+    *,
+    max_retries: int = 2,
+    json_mode: str = "strict",
 ) -> str:
-    """Return a category string for a published story.
-
-    Thin wrapper around classify_and_tag() for backward compatibility.
-    Returns "other" on any error.
-    """
-    category, _ = await classify_and_tag(ollama, title_ru, summary_ru, client=client)
+    """Return category only (wrapper around classify_and_tag)."""
+    category, _ = await classify_and_tag(
+        llm,
+        title_ru,
+        summary_ru,
+        client=client,
+        max_retries=max_retries,
+        json_mode=json_mode,
+    )
     return category
 
 
 async def generate_hashtags(
-    ollama: OllamaClient,
+    llm: LLMProvider,
     title_ru: str,
     category: str,
     client: httpx.AsyncClient | None = None,
+    *,
+    max_retries: int = 2,
+    json_mode: str = "strict",
 ) -> list[str]:
-    """Return 3–5 hashtag strings (including the leading #) for a story.
-
-    Thin wrapper — category param is ignored (classify_and_tag does both).
-    Returns an empty list on any error.
-    """
-    _, hashtags = await classify_and_tag(ollama, title_ru, "", client=client)
+    """Return hashtags only (wrapper around classify_and_tag)."""
+    _ = category  # category is ignored: classify_and_tag already returns both.
+    _, hashtags = await classify_and_tag(
+        llm,
+        title_ru,
+        "",
+        client=client,
+        max_retries=max_retries,
+        json_mode=json_mode,
+    )
     return hashtags

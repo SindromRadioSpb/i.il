@@ -288,7 +288,7 @@ async def test_health_check_db_ok(tmp_path):
     # Patch httpx to prevent real network calls
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
-    mock_response.json = MagicMock(return_value={"models": [{"name": "qwen2.5:7b-instruct"}]})
+    mock_response.json = MagicMock(return_value={"models": [{"name": s.llm_model}]})
 
     with patch("main.load_sources") as mock_load, \
          patch("main.get_enabled_sources") as mock_enabled, \
@@ -481,3 +481,67 @@ async def test_health_check_cf_sync_token_missing(tmp_path):
         result = await run_health_check(s)
 
     assert result is False
+
+async def test_health_check_llamacpp_ok(tmp_path):
+    """Health check succeeds when llama.cpp /v1/models exposes configured model."""
+    db_path = str(tmp_path / "test.db")
+    s = Settings(
+        database_path=db_path,
+        llm_provider="llamacpp",
+        llm_base_url="http://localhost:8001/v1",
+        llm_model="Qwen-9B",
+        fb_posting_enabled=False,
+        cf_sync_enabled=False,
+    )
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(return_value={"data": [{"id": "Qwen-9B"}]})
+
+    with patch("main.load_sources") as mock_load,          patch("main.get_enabled_sources") as mock_enabled,          patch("httpx.AsyncClient") as mock_client_cls:
+
+        mock_load.return_value = []
+        mock_enabled.return_value = []
+
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_http
+
+        result = await run_health_check(s)
+
+    assert result is True
+
+
+async def test_health_check_llamacpp_model_missing_fails(tmp_path):
+    """Health check fails when llama.cpp is reachable but configured model is missing."""
+    db_path = str(tmp_path / "test.db")
+    s = Settings(
+        database_path=db_path,
+        llm_provider="llamacpp",
+        llm_base_url="http://localhost:8001/v1",
+        llm_model="Qwen-9B",
+        fb_posting_enabled=False,
+        cf_sync_enabled=False,
+    )
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(return_value={"data": [{"id": "AnotherModel"}]})
+
+    with patch("main.load_sources") as mock_load,          patch("main.get_enabled_sources") as mock_enabled,          patch("httpx.AsyncClient") as mock_client_cls:
+
+        mock_load.return_value = []
+        mock_enabled.return_value = []
+
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_http
+
+        result = await run_health_check(s)
+
+    assert result is False
+

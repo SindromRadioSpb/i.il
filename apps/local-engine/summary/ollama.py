@@ -1,70 +1,26 @@
-"""summary/ollama.py — HTTP client for the local Ollama instance.
+"""summary/ollama.py — backward-compatible shim for legacy imports.
 
-Calls /api/chat (non-streaming) and returns the assistant message content.
-Accepts an optional httpx.AsyncClient for dependency injection (testing).
+New code should import providers from summary.llm_provider.
 """
 
 from __future__ import annotations
 
-import httpx
+from summary.llm_provider import OllamaProvider
 
 
-class OllamaClient:
-    """Thin wrapper around the Ollama /api/chat endpoint."""
+class OllamaClient(OllamaProvider):
+    """Compatibility alias: previous code used `OllamaClient`."""
 
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen2.5:7b-instruct",
         timeout_sec: float = 30.0,
+        max_retries: int = 2,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.timeout_sec = timeout_sec
-
-    async def chat(
-        self,
-        system: str,
-        user: str,
-        client: httpx.AsyncClient | None = None,
-        *,
-        format: str | None = None,
-    ) -> str:
-        """Call Ollama /api/chat and return the assistant message content.
-
-        Args:
-            system: System prompt.
-            user: User message.
-            client: Optional pre-constructed httpx.AsyncClient (for tests).
-                    If None, a new client is created for this request.
-            format: Optional Ollama response format.  Pass ``"json"`` to
-                    constrain the model to always return valid JSON output.
-
-        Returns:
-            The assistant's response text.
-
-        Raises:
-            httpx.HTTPStatusError: on non-2xx responses.
-            KeyError: if the response JSON is malformed.
-        """
-        payload: dict = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "stream": False,
-        }
-        if format:
-            payload["format"] = format
-        url = f"{self.base_url}/api/chat"
-
-        if client is not None:
-            response = await client.post(url, json=payload)
-        else:
-            async with httpx.AsyncClient(timeout=self.timeout_sec) as c:
-                response = await c.post(url, json=payload)
-
-        response.raise_for_status()
-        data = response.json()
-        return data["message"]["content"]
+        super().__init__(
+            base_url=base_url,
+            model=model,
+            timeout_sec=timeout_sec,
+            max_retries=max_retries,
+        )

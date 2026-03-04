@@ -6,7 +6,7 @@ Secrets (FB_PAGE_ACCESS_TOKEN, CF_SYNC_TOKEN) must never appear in logs.
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +28,16 @@ class Settings(BaseSettings):
     # --- Sources ---
     sources_registry_path: str = Field(default="../../sources/registry.yaml")
 
-    # --- Ollama ---
+    # --- LLM provider (new canonical config) ---
+    llm_provider: str = Field(default="ollama")  # ollama | llamacpp
+    llm_base_url: str = Field(default="http://localhost:11434")
+    llm_model: str = Field(default="qwen2.5:7b-instruct")
+    llm_timeout_sec: int = Field(default=30, ge=5)
+    llm_max_retries: int = Field(default=2, ge=0)
+    llm_json_mode: str = Field(default="strict")  # strict | best_effort
+
+    # --- Legacy Ollama aliases (backward compatibility) ---
+    # If provided and LLM_* is not explicitly set, values are mapped in model_validator.
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
     ollama_timeout_sec: int = Field(default=30, ge=5)
@@ -37,7 +46,7 @@ class Settings(BaseSettings):
     # --- Summary ---
     summary_target_min: int = Field(default=400, ge=100)
     summary_target_max: int = Field(default=700, ge=200)
-    max_summaries_per_run: int = Field(default=50, ge=1)
+    max_summaries_per_run: int = Field(default=10, ge=1)
 
     # --- Facebook (secrets — never log) ---
     fb_posting_enabled: bool = Field(default=False)
@@ -75,6 +84,22 @@ class Settings(BaseSettings):
     # --- Environment ---
     service_env: str = Field(default="dev")
 
+    @field_validator("llm_provider")
+    @classmethod
+    def validate_llm_provider(cls, v: str) -> str:
+        provider = v.strip().lower()
+        if provider not in ("ollama", "llamacpp"):
+            raise ValueError("llm_provider must be 'ollama' or 'llamacpp'")
+        return provider
+
+    @field_validator("llm_json_mode")
+    @classmethod
+    def validate_llm_json_mode(cls, v: str) -> str:
+        mode = v.strip().lower()
+        if mode not in ("strict", "best_effort"):
+            raise ValueError("llm_json_mode must be 'strict' or 'best_effort'")
+        return mode
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:
@@ -97,6 +122,49 @@ class Settings(BaseSettings):
         if v not in ("dev", "prod"):
             raise ValueError("service_env must be 'dev' or 'prod'")
         return v
+
+    @model_validator(mode="after")
+    def apply_legacy_ollama_aliases(self):
+        """Map deprecated OLLAMA_* inputs to LLM_* when LLM_* was not set."""
+        fields_set = set(self.model_fields_set)
+
+        if self.llm_provider == "ollama":
+            if (
+                "ollama_base_url" in fields_set
+                and "llm_base_url" not in fields_set
+                and self.ollama_base_url
+            ):
+                self.llm_base_url = self.ollama_base_url
+
+            if (
+                "ollama_model" in fields_set
+                and "llm_model" not in fields_set
+                and self.ollama_model
+            ):
+                self.llm_model = self.ollama_model
+
+            if (
+                "ollama_timeout_sec" in fields_set
+                and "llm_timeout_sec" not in fields_set
+                and self.ollama_timeout_sec is not None
+            ):
+                self.llm_timeout_sec = self.ollama_timeout_sec
+
+            if (
+                "ollama_max_retries" in fields_set
+                and "llm_max_retries" not in fields_set
+                and self.ollama_max_retries is not None
+            ):
+                self.llm_max_retries = self.ollama_max_retries
+
+        # Provider-specific default URL if user switched provider but kept defaults.
+        if (
+            self.llm_provider == "llamacpp"
+            and "llm_base_url" not in fields_set
+        ):
+            self.llm_base_url = "http://localhost:8001/v1"
+
+        return self
 
     def safe_repr(self) -> dict[str, object]:
         """Return settings dict with secrets redacted — safe to log."""

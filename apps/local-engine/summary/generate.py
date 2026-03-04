@@ -1,24 +1,17 @@
 """summary/generate.py — Summary generation pipeline for the local engine.
 
-Orchestrates: draft stories → memoization → Ollama → glossary → guards →
+Orchestrates: draft stories → memoization → LLM → glossary → guards →
 auto-category → hashtags → WOW-story FB caption → persist as published.
-
-Key differences from the TS Worker pipeline:
-- No time budget: local machine can run as long as needed.
-- MAX_SUMMARIES_PER_RUN defaults to 50 (vs 5 in Worker).
-- Uses Ollama instead of Gemini/Claude API.
-- Auto-generates category and hashtags via Ollama (best-effort).
-- Generates WOW-story FB caption (3-pass: fact-extract → draft → critic).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-import httpx
 import aiosqlite
+import httpx
 
 from db.repos.errors_repo import record_error
 from db.repos.stories_repo import (
@@ -37,7 +30,7 @@ from summary.guards import (
     guard_length,
     guard_numbers,
 )
-from summary.ollama import OllamaClient
+from summary.llm_provider import LLMProvider
 from summary.prompt import SummaryItem, build_system_prompt, build_user_message
 from summary.wow_story import WowCounters, compose_wow_post
 
@@ -64,28 +57,31 @@ def _memoization_hash(item_ids: list[str], risk_level: str) -> str:
 
 
 async def _generate_fb_caption(
-    ollama: OllamaClient,
+    llm: LLMProvider,
     items: list,
     risk_level: str,
     *,
     client: httpx.AsyncClient | None = None,
+    llm_max_retries: int = 2,
+    llm_json_mode: str = "strict",
 ) -> tuple[str | None, WowCounters]:
-    """Generate WOW-story FB caption via 3-pass Ollama pipeline (best-effort).
-
-    Uses the first item's source_url as story_url for the "Подробнее →" line.
-    Never raises — failures result in (None, counters) and story is published
-    without a WOW caption (FB falls back to legacy title + summary format).
-    """
+    """Generate WOW-story FB caption via 3-pass pipeline (best-effort)."""
     story_url = items[0].source_url if items else ""
     try:
         facts = await extract_facts(
-            ollama, items, story_url, risk_level, client=client
+            llm,
+            items,
+            story_url,
+            risk_level,
+            client=client,
+            max_retries=llm_max_retries,
+            json_mode=llm_json_mode,
         )
         if facts is None:
             wc = WowCounters()
             wc.caption_fail = 1
             return None, wc
-        return await compose_wow_post(ollama, facts, client=client)
+        return await compose_wow_post(llm, facts, client=client)
     except Exception:
         wc = WowCounters()
         wc.caption_fail = 1
@@ -94,34 +90,22 @@ async def _generate_fb_caption(
 
 async def run_summary_pipeline(
     db: aiosqlite.Connection,
-    ollama: OllamaClient,
+    llm: LLMProvider,
     run_id: str,
     *,
     max_summaries: int = 50,
     target_min: int = 400,
     target_max: int = 700,
+    llm_max_retries: int = 2,
+    llm_json_mode: str = "strict",
     http_client: httpx.AsyncClient | None = None,
     event_bus: object | None = None,
 ) -> SummaryCounters:
-    """Run the full summary pipeline for all pending draft stories.
-
-    Args:
-        db: aiosqlite connection.
-        ollama: Configured OllamaClient instance.
-        run_id: Current run ID for error recording.
-        max_summaries: Max stories to process per call (default 50).
-        target_min: Minimum body character length (default 400).
-        target_max: Maximum body character length (default 700).
-        http_client: Optional shared httpx client (injected for tests).
-
-    Returns:
-        SummaryCounters with attempted/published/skipped/failed + WOW stats.
-    """
+    """Run the full summary pipeline for all pending draft stories."""
     log = get_logger("summary")
     counters = SummaryCounters()
     stories = await get_stories_needing_summary(db, limit=max_summaries)
 
-    # Emit total count so UI can show progress bar
     if event_bus is not None:
         await event_bus.emit("phase_start", {"total": len(stories)}, phase="summary")
 
@@ -133,29 +117,30 @@ async def run_summary_pipeline(
                 "story_id": story.story_id[:8],
                 "idx": idx + 1,
                 "total": len(stories),
-                "title_sample": None,  # title_he not available on story row here
+                "title_sample": None,
             }, phase="summary")
+
         try:
             items = await get_story_items_for_summary(db, story.story_id)
             if not items:
                 counters.skipped += 1
                 if event_bus is not None:
                     await event_bus.emit("story_skip", {
-                        "story_id": story.story_id[:8], "reason": "no_items",
+                        "story_id": story.story_id[:8],
+                        "reason": "no_items",
                     }, phase="summary")
                 continue
 
-            # Memoization: skip if this exact content was already summarised.
             new_hash = _memoization_hash([i.item_id for i in items], story.risk_level)
             if story.summary_hash == new_hash:
                 counters.skipped += 1
                 if event_bus is not None:
                     await event_bus.emit("story_skip", {
-                        "story_id": story.story_id[:8], "reason": "memoized",
+                        "story_id": story.story_id[:8],
+                        "reason": "memoized",
                     }, phase="summary")
                 continue
 
-            # ── Pass 0: Build prompts and call Ollama (5-section format) ─────
             summary_items = [
                 SummaryItem(
                     item_id=i.item_id,
@@ -168,7 +153,7 @@ async def run_summary_pipeline(
             system = build_system_prompt(story.risk_level)
             user = build_user_message(summary_items)
 
-            raw = await ollama.chat(system, user, client=http_client)
+            raw = await llm.chat(system, user, client=http_client)
             glossarized = apply_glossary(raw)
             parsed = parse_sections(glossarized)
 
@@ -187,7 +172,6 @@ async def run_summary_pipeline(
             body = format_body(parsed)
             full_text = format_full(parsed)
 
-            # Guards (5-section format)
             guard_results = [
                 guard_length(body, target_min, target_max),
                 guard_forbidden_words(full_text),
@@ -207,17 +191,28 @@ async def run_summary_pipeline(
                 counters.failed += 1
                 continue
 
-            # ── Best-effort enrichment (failures don't block publish) ────────
-            # Run category+hashtags concurrently with the WOW pipeline.
-            # classify_and_tag uses one combined Ollama call (was 2 sequential),
-            # and runs in parallel with the 2-4 WOW Ollama calls.
             (cat_result, wow_result) = await asyncio.gather(
-                classify_and_tag(ollama, parsed.title, full_text, client=http_client),
-                _generate_fb_caption(ollama, items, story.risk_level, client=http_client),
+                classify_and_tag(
+                    llm,
+                    parsed.title,
+                    full_text,
+                    client=http_client,
+                    max_retries=llm_max_retries,
+                    json_mode=llm_json_mode,
+                ),
+                _generate_fb_caption(
+                    llm,
+                    items,
+                    story.risk_level,
+                    client=http_client,
+                    llm_max_retries=llm_max_retries,
+                    llm_json_mode=llm_json_mode,
+                ),
             )
             category, hashtag_list = cat_result
             hashtags_str = " ".join(hashtag_list) if hashtag_list else None
             fb_caption, wc = wow_result
+
             counters.wow_caption_ok += wc.caption_ok
             counters.wow_caption_fail += wc.caption_fail
             counters.wow_rewrite_attempts += wc.rewrite_attempts
@@ -234,6 +229,7 @@ async def run_summary_pipeline(
                 fb_caption=fb_caption,
             )
             counters.published += 1
+
             if event_bus is not None:
                 await event_bus.emit("story_ok", {
                     "story_id": story.story_id[:8],
@@ -243,13 +239,12 @@ async def run_summary_pipeline(
 
         except Exception as exc:
             err_msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            await record_error(
-                db, run_id, "summary", None, story.story_id, err_msg
-            )
+            await record_error(db, run_id, "summary", None, story.story_id, err_msg)
             counters.failed += 1
             if event_bus is not None:
                 await event_bus.emit("story_fail", {
-                    "story_id": story.story_id[:8], "error": err_msg,
+                    "story_id": story.story_id[:8],
+                    "error": err_msg,
                 }, phase="summary")
 
     return counters
