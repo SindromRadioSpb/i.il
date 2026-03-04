@@ -144,7 +144,7 @@ class EventBus:
         self._subscribers.append(q)
         try:
             if replay_history:
-                for ev in self._history[-50:]:   # last 50 events on connect
+                for ev in self._history[-200:]:  # full history on connect
                     yield ev
             while True:
                 ev = await q.get()

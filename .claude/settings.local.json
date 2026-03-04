@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install:*)",
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(pnpm:*)",
+      "Bash(./node_modules/.bin/wrangler:*)",
+      "Bash(ls:*)",
+      "Bash(/j/Project_Vibe/i.il/node_modules/.bin/wrangler.CMD:*)",
+      "Bash(../../node_modules/.bin/wrangler.CMD login:*)",
+      "Bash(../../node_modules/.bin/wrangler.CMD d1:*)",
+      "Bash(bash:*)",
+      "Bash(python3:*)",
+      "Bash(chmod +x:*)",
+      "Bash(npm view:*)",
+      "Bash(node_modules/.bin/wrangler:*)",
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(npx wrangler:*)",
+      "Bash(PUBLIC_API_BASE_URL=https://iil-production.sindromradiospb.workers.dev pnpm:*)",
+      "Bash(grep:*)",
+      "Bash(wmic cpu:*)",
+      "Bash(wmic:*)",
+      "Bash(echo ollama: not found:*)",
+      "Bash(ollama list:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(echo Ollama API not responding:*)",
+      "Bash(ollama show:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(tasklist:*)",
+      "Bash(gh run:*)"
+    ]
+  }
+}
