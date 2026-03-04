@@ -1,3 +1,10 @@
+---
+name: news-pipeline
+description: Ingestion, dedupe, clustering, and summary pipeline workflow.
+metadata:
+  short-description: News pipeline workflow
+---
+
 # .agents/skills/news-pipeline/SKILL.md — Ingestion, Dedupe, Clustering Pack
 
 ## Purpose

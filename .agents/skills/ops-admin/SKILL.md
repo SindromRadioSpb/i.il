@@ -1,3 +1,10 @@
+---
+name: ops-admin
+description: Operational runbook for monitoring and admin actions.
+metadata:
+  short-description: Ops and admin runbook
+---
+
 # .agents/skills/ops-admin/SKILL.md — Ops & Admin Pack
 
 ## Purpose

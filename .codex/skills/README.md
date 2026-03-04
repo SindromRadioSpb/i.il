@@ -1,18 +1,15 @@
-## Codex Skills Mirror
+## Codex Skills
 
-This directory is a Codex-compatible mirror of repository skills from:
+Canonical skills for this repository live only in:
 
 - `/.agents/skills/*/SKILL.md`
 
-Source of truth stays in `.agents/skills`.
-If source skills change, re-sync with:
+Why this layout:
 
-```powershell
-Copy-Item -Path .agents/skills/* -Destination .codex/skills -Recurse -Force
-```
+- avoids duplicate skill loading across `.agents`, local `.codex`, and global `%USERPROFILE%\.codex`
+- keeps one source of truth for edits and reviews
 
-Global copies for this project were also created in:
+Current policy:
 
-- `C:\Users\Win10_Game_OS\.codex\skills\iil-*`
-
-They are intended for Codex skill discovery in new sessions.
+- do not mirror `.agents/skills` into this folder
+- do not create project-specific global copies under `%USERPROFILE%\.codex\skills`

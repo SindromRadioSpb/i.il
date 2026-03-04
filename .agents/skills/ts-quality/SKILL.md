@@ -1,3 +1,10 @@
+---
+name: ts-quality
+description: TypeScript quality workflow for worker and web changes.
+metadata:
+  short-description: TypeScript quality checks
+---
+
 # .agents/skills/ts-quality/SKILL.md — TypeScript Quality Pack
 
 ## Purpose

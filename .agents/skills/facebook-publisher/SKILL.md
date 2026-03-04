@@ -1,3 +1,10 @@
+---
+name: facebook-publisher
+description: Safe and idempotent Facebook page crossposting workflow.
+metadata:
+  short-description: Facebook crossposting
+---
+
 # .agents/skills/facebook-publisher/SKILL.md — Facebook Crossposting Pack
 
 ## Purpose

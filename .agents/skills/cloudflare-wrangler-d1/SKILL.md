@@ -1,3 +1,10 @@
+---
+name: cloudflare-wrangler-d1
+description: Safe Wrangler and D1 operations, migrations, and bindings.
+metadata:
+  short-description: Wrangler + D1 ops
+---
+
 # .agents/skills/cloudflare-wrangler-d1/SKILL.md — Wrangler + D1 Pack
 
 ## Purpose
