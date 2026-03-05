@@ -9,6 +9,7 @@ export interface Env {
   ADMIN_ENABLED: string;
   CRON_INTERVAL_MIN: string;
   MAX_NEW_ITEMS_PER_RUN: string;
+  MAX_SUMMARIES_PER_RUN?: string;
   SUMMARY_TARGET_MIN: string;
   SUMMARY_TARGET_MAX: string;
   // Secrets — set via `wrangler secret put <KEY>`

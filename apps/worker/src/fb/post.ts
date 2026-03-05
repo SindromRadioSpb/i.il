@@ -5,6 +5,8 @@ import {
   markFbFailed,
 } from '../db/publications_repo';
 import { recordError } from '../db/errors_repo';
+import { validateUrlForFetch } from '../normalize/url';
+import { fetchWithTimeout } from '../net/fetch_with_timeout';
 
 const FB_API_BASE = 'https://graph.facebook.com/v21.0';
 const MAX_FB_POSTS_PER_RUN = 5;
@@ -15,7 +17,8 @@ export interface FbCrosspostCounters {
 }
 
 interface FbPostResult {
-  id: string;
+  id?: string;
+  post_id?: string;
 }
 
 interface FbErrorResponse {
@@ -27,20 +30,94 @@ interface FbErrorResponse {
   };
 }
 
+function unique<T>(arr: T[]): T[] {
+  return [...new Set(arr)];
+}
+
+function toAbsoluteUrl(baseUrl: string, raw: string): string | null {
+  try {
+    const abs = new URL(raw, baseUrl);
+    if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return null;
+    return abs.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getMetaContent(html: string, key: string): string | null {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const p1 = new RegExp(
+    `<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`,
+    'i',
+  );
+  const m1 = html.match(p1);
+  if (m1?.[1]) return m1[1].trim();
+
+  const p2 = new RegExp(
+    `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`,
+    'i',
+  );
+  const m2 = html.match(p2);
+  if (m2?.[1]) return m2[1].trim();
+
+  return null;
+}
+
+function extractImageUrls(articleUrl: string, html: string): string[] {
+  const candidates: string[] = [];
+
+  const ogImage = getMetaContent(html, 'og:image');
+  const ogImageUrl = getMetaContent(html, 'og:image:url');
+  const twitterImage = getMetaContent(html, 'twitter:image');
+  for (const raw of [ogImage, ogImageUrl, twitterImage]) {
+    if (!raw) continue;
+    const abs = toAbsoluteUrl(articleUrl, raw);
+    if (abs) candidates.push(abs);
+  }
+
+  const imgRe = /<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRe.exec(html)) !== null) {
+    const abs = toAbsoluteUrl(articleUrl, m[1] ?? '');
+    if (abs) candidates.push(abs);
+    if (candidates.length >= 12) break;
+  }
+
+  return unique(candidates);
+}
+
+async function resolveStoryImages(sourceUrl: string | null): Promise<string[]> {
+  if (!sourceUrl) return [];
+  validateUrlForFetch(sourceUrl);
+  const resp = await fetchWithTimeout(
+    sourceUrl,
+    { headers: { 'User-Agent': 'NewsHub/0.1' } },
+    { timeoutMs: 10_000, retries: 1 },
+  );
+  const html = await resp.text();
+  return extractImageUrls(sourceUrl, html).slice(0, 4);
+}
+
 /**
- * Post a message + link to a Facebook Page feed via Graph API.
- * Throws on non-2xx or missing post ID.
+ * Post a photo + caption to a Facebook Page.
+ * We require at least one image for each post.
  */
 export async function postToFacebook(
   pageId: string,
   token: string,
   message: string,
-  link: string,
+  imageUrl: string,
 ): Promise<string> {
-  const res = await fetch(`${FB_API_BASE}/${pageId}/feed`, {
+  const body = new URLSearchParams({
+    url: imageUrl,
+    caption: message,
+    access_token: token,
+  });
+
+  const res = await fetch(`${FB_API_BASE}/${pageId}/photos`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message, link, access_token: token }),
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -62,31 +139,43 @@ export async function postToFacebook(
   }
 
   const data = (await res.json()) as FbPostResult;
-  if (!data.id) throw new Error('Facebook API: missing post id in response');
-  return data.id;
+  const postId = data.post_id ?? data.id;
+  if (!postId) throw new Error('Facebook API: missing post id in response');
+  return postId;
 }
 
-/** Build the FB post message from story data. */
+/** Build expert-style message for Middle East context. */
 function buildMessage(
   titleRu: string | null,
   summaryRu: string | null,
   storyUrl: string,
+  sourceUrl: string | null,
 ): string {
   const title = titleRu ?? 'Новость';
-  const excerptLines = summaryRu
-    ? summaryRu.split('\n').filter(l => l.trim()).slice(0, 2).join('\n')
-    : '';
-  const parts = [`📌 ${title}`];
-  if (excerptLines) parts.push(excerptLines);
-  parts.push(`Читать полностью → ${storyUrl}`);
+  const lines = (summaryRu ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean);
+  const keyLines = lines
+    .filter(l => /^Что произошло:|^Почему важно:|^Что дальше:/i.test(l))
+    .slice(0, 3)
+    .map(l => `- ${l}`);
+
+  const parts = [
+    'Ближний Восток: экспертный разбор',
+    `Тема: ${title}`,
+  ];
+  if (keyLines.length > 0) {
+    parts.push(keyLines.join('\n'));
+  }
+  parts.push(`Подробно: ${storyUrl}`);
+  if (sourceUrl) parts.push(`Источник: ${sourceUrl}`);
   return parts.join('\n\n');
 }
 
 /**
- * Resolve Facebook error code to a publications fb_status value.
- * 190 = invalid token, 102 = session key invalid → auth_error (stop posting this run).
- * 4 = app-level rate limit, 32 = page-level rate limit → rate_limited.
- * Anything else → failed.
+ * Resolve Facebook error code to publications fb_status.
+ * 190/102 = auth_error, 4/32 = rate_limited, everything else = failed.
  */
 function resolveErrorStatus(
   fbCode: number | undefined,
@@ -96,10 +185,6 @@ function resolveErrorStatus(
   return 'failed';
 }
 
-/**
- * Main Facebook crossposting orchestrator.
- * Called from runIngest() when FB_POSTING_ENABLED === 'true'.
- */
 export async function runFbCrosspost(
   env: Env,
   runId: string,
@@ -114,7 +199,6 @@ export async function runFbCrosspost(
 
   const siteBase = env.PUBLIC_SITE_BASE_URL ?? '';
   const db = env.DB;
-
   const stories = await getStoriesForFbPosting(db, MAX_FB_POSTS_PER_RUN);
 
   let authErrorEncountered = false;
@@ -123,10 +207,15 @@ export async function runFbCrosspost(
     if (authErrorEncountered) break;
 
     const storyUrl = `${siteBase}/story/${story.storyId}`;
-    const message = buildMessage(story.titleRu, story.summaryRu, storyUrl);
+    const message = buildMessage(story.titleRu, story.summaryRu, storyUrl, story.sourceUrl);
 
     try {
-      const postId = await postToFacebook(pageId, token, message, storyUrl);
+      const images = await resolveStoryImages(story.sourceUrl);
+      if (images.length === 0) {
+        throw new Error('No article image found for Facebook post');
+      }
+
+      const postId = await postToFacebook(pageId, token, message, images[0]!);
       await markFbPosted(db, story.storyId, postId);
       counters.posted++;
     } catch (err: unknown) {

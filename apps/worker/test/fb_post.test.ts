@@ -2,10 +2,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { postToFacebook, runFbCrosspost } from '../src/fb/post';
 import type { Env } from '../src/index';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     DB: {} as unknown as Env['DB'],
@@ -20,35 +16,45 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   } as Env;
 }
 
+function makeDbWithStories(stories: object[]) {
+  return {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        all: vi.fn().mockResolvedValue({ results: stories }),
+        run: vi.fn().mockResolvedValue({}),
+      }),
+    }),
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-// ---------------------------------------------------------------------------
-// postToFacebook
-// ---------------------------------------------------------------------------
-
 describe('postToFacebook', () => {
-  it('sends correct POST request and returns post ID', async () => {
+  it('posts to /photos and returns post id', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ id: '12345_67890' }),
+        json: async () => ({ post_id: '123_456' }),
       }),
     );
 
-    const postId = await postToFacebook('PAGE_ID', 'TOKEN', 'Hello', 'https://example.com');
+    const postId = await postToFacebook(
+      'PAGE_ID',
+      'TOKEN',
+      'caption text',
+      'https://cdn.example.com/image.jpg',
+    );
 
-    expect(postId).toBe('12345_67890');
+    expect(postId).toBe('123_456');
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/PAGE_ID/feed');
-    expect(url).toContain('graph.facebook.com');
-    const body = JSON.parse(init.body as string) as Record<string, string>;
-    expect(body.message).toBe('Hello');
-    expect(body.link).toBe('https://example.com');
-    expect(body.access_token).toBe('TOKEN');
+    expect(url).toContain('/PAGE_ID/photos');
+    const body = String(init.body ?? '');
+    expect(body).toContain('url=https%3A%2F%2Fcdn.example.com%2Fimage.jpg');
+    expect(body).toContain('access_token=TOKEN');
   });
 
   it('throws on non-2xx response', async () => {
@@ -61,78 +67,63 @@ describe('postToFacebook', () => {
       }),
     );
 
-    await expect(postToFacebook('P', 'T', 'msg', 'link')).rejects.toThrow('Facebook API 400');
-  });
-
-  it('throws on response missing id', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      }),
-    );
-
-    await expect(postToFacebook('P', 'T', 'msg', 'link')).rejects.toThrow('missing post id');
+    await expect(
+      postToFacebook('PAGE_ID', 'TOKEN', 'caption', 'https://cdn.example.com/img.jpg'),
+    ).rejects.toThrow('Facebook API 400');
   });
 });
 
-// ---------------------------------------------------------------------------
-// runFbCrosspost — guard conditions
-// ---------------------------------------------------------------------------
-
-describe('runFbCrosspost — guards', () => {
-  it('returns zeros when FB_POSTING_ENABLED is not "true"', async () => {
-    const env = makeEnv({ FB_POSTING_ENABLED: 'false' });
-    const result = await runFbCrosspost(env, 'run-1');
+describe('runFbCrosspost guards', () => {
+  it('returns zeros when FB_POSTING_ENABLED is not true', async () => {
+    const result = await runFbCrosspost(makeEnv({ FB_POSTING_ENABLED: 'false' }), 'run-1');
     expect(result).toEqual({ posted: 0, failed: 0 });
   });
 
-  it('returns zeros when FB_PAGE_ACCESS_TOKEN is missing', async () => {
-    const env = makeEnv({ FB_POSTING_ENABLED: 'true', FB_PAGE_ID: 'PAGE_ID' });
-    const result = await runFbCrosspost(env, 'run-2');
-    expect(result).toEqual({ posted: 0, failed: 0 });
-  });
-
-  it('returns zeros when FB_PAGE_ID is missing', async () => {
-    const env = makeEnv({ FB_POSTING_ENABLED: 'true', FB_PAGE_ACCESS_TOKEN: 'TOKEN' });
-    const result = await runFbCrosspost(env, 'run-3');
-    expect(result).toEqual({ posted: 0, failed: 0 });
+  it('returns zeros when token or page id is missing', async () => {
+    const r1 = await runFbCrosspost(makeEnv({ FB_POSTING_ENABLED: 'true', FB_PAGE_ID: 'P' }), 'run-2');
+    const r2 = await runFbCrosspost(makeEnv({ FB_POSTING_ENABLED: 'true', FB_PAGE_ACCESS_TOKEN: 'T' }), 'run-3');
+    expect(r1).toEqual({ posted: 0, failed: 0 });
+    expect(r2).toEqual({ posted: 0, failed: 0 });
   });
 });
 
-// ---------------------------------------------------------------------------
-// runFbCrosspost — happy path
-// ---------------------------------------------------------------------------
-
-describe('runFbCrosspost — posting', () => {
+describe('runFbCrosspost posting behavior', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ id: 'post-abc' }),
+      vi.fn(async (input: string | Request) => {
+        const url = String(input);
+
+        // article page fetch for image extraction
+        if (url === 'https://www.ynet.co.il/news/article/abc') {
+          return {
+            ok: true,
+            text: async () => '<meta property="og:image" content="https://cdn.ynet.co.il/a.jpg">',
+          };
+        }
+
+        // facebook photo post
+        if (url.includes('/PAGE_ID/photos')) {
+          return {
+            ok: true,
+            json: async () => ({ post_id: 'post-abc' }),
+          };
+        }
+
+        return { ok: false, status: 404, json: async () => ({}) };
       }),
     );
   });
 
-  it('posts stories and returns correct counters', async () => {
-    const dbStub = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          all: vi.fn().mockResolvedValue({
-            results: [
-              {
-                story_id: 'story-1',
-                title_ru: 'Заголовок 1',
-                summary_ru: 'Строка 1\nСтрока 2\nСтрока 3',
-              },
-            ],
-          }),
-          run: vi.fn().mockResolvedValue({}),
-        }),
-      }),
-    };
+  it('posts one story when image is found', async () => {
+    const dbStub = makeDbWithStories([
+      {
+        story_id: 'story-1',
+        title_ru: 'Заголовок 1',
+        summary_ru: 'Что произошло: факт.\nПочему важно: важно.\nЧто дальше: развитие.',
+        source_url: 'https://www.ynet.co.il/news/article/abc',
+      },
+    ]);
 
     const env = makeEnv({
       DB: dbStub as unknown as Env['DB'],
@@ -143,27 +134,18 @@ describe('runFbCrosspost — posting', () => {
     });
 
     const result = await runFbCrosspost(env, 'run-ok');
-    expect(result.posted).toBe(1);
-    expect(result.failed).toBe(0);
+    expect(result).toEqual({ posted: 1, failed: 0 });
   });
 
-  it('message includes title and first 2 lines of summary and link', async () => {
-    const dbStub = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          all: vi.fn().mockResolvedValue({
-            results: [
-              {
-                story_id: 'story-2',
-                title_ru: 'Мой Заголовок',
-                summary_ru: 'Первая строка\nВторая строка\nТретья строка',
-              },
-            ],
-          }),
-          run: vi.fn().mockResolvedValue({}),
-        }),
-      }),
-    };
+  it('caption follows expert style and includes source link', async () => {
+    const dbStub = makeDbWithStories([
+      {
+        story_id: 'story-2',
+        title_ru: 'Региональная сводка',
+        summary_ru: 'Что произошло: событие.\nПочему важно: риск.\nЧто дальше: наблюдение.',
+        source_url: 'https://www.ynet.co.il/news/article/abc',
+      },
+    ]);
 
     const env = makeEnv({
       DB: dbStub as unknown as Env['DB'],
@@ -175,95 +157,108 @@ describe('runFbCrosspost — posting', () => {
 
     await runFbCrosspost(env, 'run-msg');
 
-    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as Record<string, string>;
-    expect(body.message).toContain('📌 Мой Заголовок');
-    expect(body.message).toContain('Первая строка');
-    expect(body.message).toContain('Вторая строка');
-    expect(body.message).not.toContain('Третья строка');
-    expect(body.message).toContain('/story/story-2');
-    expect(body.link).toBe('https://news.example.com/story/story-2');
+    const photoCall = (fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+      call => String(call[0]).includes('/PAGE_ID/photos'),
+    );
+    expect(photoCall).toBeDefined();
+    const body = String(photoCall?.[1]?.body ?? '');
+    const decoded = decodeURIComponent(body.replace(/\+/g, '%20'));
+    expect(decoded).toContain('Ближний Восток: экспертный разбор');
+    expect(decoded).toContain('Источник: https://www.ynet.co.il/news/article/abc');
+    expect(decoded).toContain('Подробно: https://news.example.com/story/story-2');
   });
-});
 
-// ---------------------------------------------------------------------------
-// runFbCrosspost — error handling
-// ---------------------------------------------------------------------------
-
-describe('runFbCrosspost — error handling', () => {
-  it('marks story as auth_error on FB code 190 and stops further posts', async () => {
-    const runCalls: string[] = [];
-    const dbStub = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          all: vi.fn().mockResolvedValue({
-            results: [
-              { story_id: 's1', title_ru: 'T1', summary_ru: 'Body' },
-              { story_id: 's2', title_ru: 'T2', summary_ru: 'Body' },
-            ],
-          }),
-          run: vi.fn().mockImplementation(() => {
-            runCalls.push('run');
-            return Promise.resolve({});
-          }),
-        }),
-      }),
-    };
-
+  it('fails post when article has no images', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({ error: { code: 190, message: 'invalid token' } }),
+      vi.fn(async (input: string | Request) => {
+        const url = String(input);
+        if (url === 'https://www.ynet.co.il/news/article/no-image') {
+          return { ok: true, text: async () => '<html><head><title>No image</title></head></html>' };
+        }
+        if (url.includes('/PAGE_ID/photos')) {
+          return { ok: true, json: async () => ({ post_id: 'post-xyz' }) };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
       }),
     );
 
-    const env = makeEnv({
-      DB: dbStub as unknown as Env['DB'],
-      FB_POSTING_ENABLED: 'true',
-      FB_PAGE_ACCESS_TOKEN: 'BAD_TOKEN',
-      FB_PAGE_ID: 'PAGE_ID',
-    });
-
-    const result = await runFbCrosspost(env, 'run-auth-err');
-    // First story fails with auth_error; second is skipped (loop break)
-    expect(result.failed).toBe(1);
-    expect(result.posted).toBe(0);
-    // Only one FB API call (second story skipped)
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
-  });
-
-  it('marks story as rate_limited on FB code 4', async () => {
-    const dbStub = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          all: vi.fn().mockResolvedValue({
-            results: [{ story_id: 's1', title_ru: 'T1', summary_ru: 'Body' }],
-          }),
-          run: vi.fn().mockResolvedValue({}),
-        }),
-      }),
-    };
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-        json: async () => ({ error: { code: 4, message: 'rate limit' } }),
-      }),
-    );
+    const dbStub = makeDbWithStories([
+      {
+        story_id: 'story-3',
+        title_ru: 'Заголовок 3',
+        summary_ru: 'Что произошло: факт.',
+        source_url: 'https://www.ynet.co.il/news/article/no-image',
+      },
+    ]);
 
     const env = makeEnv({
       DB: dbStub as unknown as Env['DB'],
       FB_POSTING_ENABLED: 'true',
       FB_PAGE_ACCESS_TOKEN: 'TOKEN',
       FB_PAGE_ID: 'PAGE_ID',
+      PUBLIC_SITE_BASE_URL: 'https://news.example.com',
     });
 
-    const result = await runFbCrosspost(env, 'run-rate');
-    expect(result.failed).toBe(1);
-    expect(result.posted).toBe(0);
+    const result = await runFbCrosspost(env, 'run-no-image');
+    expect(result).toEqual({ posted: 0, failed: 1 });
+    const photoCalls = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      call => String(call[0]).includes('/PAGE_ID/photos'),
+    );
+    expect(photoCalls.length).toBe(0);
+  });
+
+  it('marks auth_error and stops further posts on FB code 190', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | Request) => {
+        const url = String(input);
+        if (url.startsWith('https://www.ynet.co.il/news/article/')) {
+          return {
+            ok: true,
+            text: async () => '<meta property="og:image" content="https://cdn.ynet.co.il/a.jpg">',
+          };
+        }
+        if (url.includes('/PAGE_ID/photos')) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({ error: { code: 190, message: 'invalid token' } }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    const dbStub = makeDbWithStories([
+      {
+        story_id: 's1',
+        title_ru: 'T1',
+        summary_ru: 'Что произошло: x.',
+        source_url: 'https://www.ynet.co.il/news/article/a1',
+      },
+      {
+        story_id: 's2',
+        title_ru: 'T2',
+        summary_ru: 'Что произошло: y.',
+        source_url: 'https://www.ynet.co.il/news/article/a2',
+      },
+    ]);
+
+    const env = makeEnv({
+      DB: dbStub as unknown as Env['DB'],
+      FB_POSTING_ENABLED: 'true',
+      FB_PAGE_ACCESS_TOKEN: 'BAD_TOKEN',
+      FB_PAGE_ID: 'PAGE_ID',
+      PUBLIC_SITE_BASE_URL: 'https://news.example.com',
+    });
+
+    const result = await runFbCrosspost(env, 'run-auth');
+    expect(result).toEqual({ posted: 0, failed: 1 });
+
+    const photoCalls = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      call => String(call[0]).includes('/PAGE_ID/photos'),
+    );
+    expect(photoCalls.length).toBe(1);
   });
 });

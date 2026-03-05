@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -45,6 +46,22 @@ def _json(data: object, status: int = 200) -> Response:
     )
 
 
+@asynccontextmanager
+async def _open_db(db_path: str):
+    """Open local SQLite connection with the same safety pragmas as engine DB access."""
+    import aiosqlite
+
+    db = await aiosqlite.connect(db_path)
+    db.row_factory = aiosqlite.Row
+    try:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        yield db
+    finally:
+        await db.close()
+
+
 # ── Route handlers ────────────────────────────────────────────────────────────
 
 
@@ -61,9 +78,7 @@ async def handle_status(request: Request) -> Response:
     db_stats: dict = {}
 
     try:
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with _open_db(db_path) as db:
             async with db.execute(
                 "SELECT state, COUNT(*) as n FROM stories GROUP BY state"
             ) as cur:
@@ -138,9 +153,7 @@ async def handle_published(request: Request) -> Response:
     """GET /published — recent published stories from local SQLite."""
     db_path: str = request.app["db_path"]
     try:
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with _open_db(db_path) as db:
             async with db.execute(
                 "SELECT s.story_id, s.title_ru, s.category, s.last_update_at,"
                 "       p.fb_status, p.fb_post_id, p.fb_attempts, p.fb_posted_at,"
@@ -160,13 +173,36 @@ async def handle_delete_drafts(request: Request) -> Response:
     """DELETE /drafts — remove all draft stories from the local SQLite database."""
     db_path: str = request.app["db_path"]
     try:
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
+        async with _open_db(db_path) as db:
             cur = await db.execute("DELETE FROM stories WHERE state = 'draft'")
             deleted = cur.rowcount
+            # Self-heal: clean legacy orphan rows that may exist from older runs
+            # where foreign_keys pragma was not enabled in this API path.
+            cur_si = await db.execute(
+                "DELETE FROM story_items WHERE story_id NOT IN (SELECT story_id FROM stories)"
+            )
+            cleaned_story_items = cur_si.rowcount
+            cur_pub = await db.execute(
+                "DELETE FROM publications WHERE story_id NOT IN (SELECT story_id FROM stories)"
+            )
+            cleaned_publications = cur_pub.rowcount
+            cur_q = await db.execute(
+                "DELETE FROM publish_queue WHERE story_id NOT IN (SELECT story_id FROM stories)"
+            )
+            cleaned_queue = cur_q.rowcount
             await db.commit()
         log.info(f"Deleted {deleted} local draft stories via API")
-        return _json({"ok": True, "deleted": deleted})
+        return _json(
+            {
+                "ok": True,
+                "deleted": deleted,
+                "cleaned_orphans": {
+                    "story_items": cleaned_story_items,
+                    "publications": cleaned_publications,
+                    "publish_queue": cleaned_queue,
+                },
+            }
+        )
     except Exception as exc:
         log.error(f"Failed to delete drafts: {exc}")
         return _json({"ok": False, "error": str(exc)}, status=500)

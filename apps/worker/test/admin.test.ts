@@ -222,6 +222,32 @@ describe('GET /api/v1/admin/drafts', () => {
 });
 
 // ---------------------------------------------------------------------------
+// DELETE /api/v1/admin/drafts
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/v1/admin/drafts', () => {
+  function del(path: string, env: Env) {
+    return route(new Request(`http://local${path}`, { method: 'DELETE' }), env, ctx);
+  }
+
+  it('returns deleted count when admin is enabled', async () => {
+    const stmt = {
+      bind: function () { return this; },
+      run: () => Promise.resolve({ success: true, meta: { changes: 7 } }),
+      all: <T>() => Promise.resolve({ results: [] as T[], success: true, meta: {} }),
+      first: <T>() => Promise.resolve(null as T | null),
+    };
+    const db = { prepare: () => stmt } as unknown as D1Database;
+
+    const res = await del('/api/v1/admin/drafts', makeEnv({ ADMIN_ENABLED: 'true', DB: db }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; data: { deleted: number } };
+    expect(body.ok).toBe(true);
+    expect(body.data.deleted).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/admin/story/:id/hold  &  /release
 // ---------------------------------------------------------------------------
 
@@ -278,6 +304,41 @@ describe('POST /api/v1/admin/story/:id/release', () => {
   it('returns 404 when story is not found', async () => {
     const res = await post('/api/v1/admin/story/missing/release', makeEnv({ ADMIN_ENABLED: 'true', DB: EMPTY_DB }));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/admin/story/:id
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/v1/admin/story/:id', () => {
+  function del(path: string, env: Env) {
+    return route(new Request(`http://local${path}`, { method: 'DELETE' }), env, ctx);
+  }
+
+  it('returns 200 when story is deleted', async () => {
+    const stmt = {
+      bind: function () { return this; },
+      run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
+      all: <T>() => Promise.resolve({ results: [] as T[], success: true, meta: {} }),
+      first: <T>() => Promise.resolve(null as T | null),
+    };
+    const db = { prepare: () => stmt } as unknown as D1Database;
+
+    const res = await del('/api/v1/admin/story/story-abc', makeEnv({ ADMIN_ENABLED: 'true', DB: db }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; data: { story_id: string; deleted: boolean } };
+    expect(body.ok).toBe(true);
+    expect(body.data.story_id).toBe('story-abc');
+    expect(body.data.deleted).toBe(true);
+  });
+
+  it('returns 404 when story is missing', async () => {
+    const res = await del('/api/v1/admin/story/missing', makeEnv({ ADMIN_ENABLED: 'true', DB: EMPTY_DB }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe('not_found');
   });
 });
 

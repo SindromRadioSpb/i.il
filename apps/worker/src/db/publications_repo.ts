@@ -4,6 +4,7 @@ export interface FbStoryRow {
   storyId: string;
   titleRu: string | null;
   summaryRu: string | null;
+  sourceUrl: string | null;
 }
 
 /**
@@ -25,7 +26,15 @@ export async function getStoriesForFbPosting(
 ): Promise<FbStoryRow[]> {
   const result = await db
     .prepare(
-      `SELECT p.story_id, s.title_ru, s.summary_ru
+      `SELECT p.story_id, s.title_ru, s.summary_ru,
+              (
+                SELECT i.source_url
+                FROM story_items si
+                JOIN items i ON i.item_id = si.item_id
+                WHERE si.story_id = p.story_id
+                ORDER BY COALESCE(i.published_at, si.added_at) DESC
+                LIMIT 1
+              ) AS source_url
        FROM publications p
        JOIN stories s USING(story_id)
        WHERE p.web_status = 'published'
@@ -38,12 +47,18 @@ export async function getStoriesForFbPosting(
        LIMIT ?`,
     )
     .bind(limit)
-    .all<{ story_id: string; title_ru: string | null; summary_ru: string | null }>();
+    .all<{
+      story_id: string;
+      title_ru: string | null;
+      summary_ru: string | null;
+      source_url: string | null;
+    }>();
 
   return (result.results ?? []).map(r => ({
     storyId: r.story_id,
     titleRu: r.title_ru,
     summaryRu: r.summary_ru,
+    sourceUrl: r.source_url,
   }));
 }
 

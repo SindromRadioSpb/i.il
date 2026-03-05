@@ -23,7 +23,7 @@ import {
 } from '../db/stories_repo';
 import { recordError } from '../db/errors_repo';
 
-const MAX_SUMMARIES_PER_RUN = 5;
+const DEFAULT_MAX_SUMMARIES_PER_RUN = 50;
 
 export interface SummaryCounters {
   attempted: number;
@@ -36,17 +36,20 @@ export async function runSummaryPipeline(env: Env, runId: string, budget?: RunBu
   const db = env.DB;
   const targetMin = parseInt(env.SUMMARY_TARGET_MIN ?? '400', 10) || 400;
   const targetMax = parseInt(env.SUMMARY_TARGET_MAX ?? '700', 10) || 700;
+  const maxSummariesPerRun =
+    parseInt(env.MAX_SUMMARIES_PER_RUN ?? String(DEFAULT_MAX_SUMMARIES_PER_RUN), 10)
+    || DEFAULT_MAX_SUMMARIES_PER_RUN;
 
   const counters: SummaryCounters = { attempted: 0, published: 0, skipped: 0, failed: 0 };
 
   const chain = buildChain(env);
   if (chain.length === 0) return counters; // no providers configured
 
-  const stories = await getStoriesNeedingSummary(db, MAX_SUMMARIES_PER_RUN);
+  const stories = await getStoriesNeedingSummary(db, maxSummariesPerRun);
 
   for (const story of stories) {
-    // Stop early if cron time budget is running low (reserve 5s per LLM call).
-    if (budget && !budget.hasTime(5_000)) break;
+    // Stop early if cron time budget is running low (reserve 1.5s per item).
+    if (budget && !budget.hasTime(1_500)) break;
 
     counters.attempted++;
     try {

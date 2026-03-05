@@ -68,7 +68,7 @@ describe('GET /api/v1/story/:id — found', () => {
   const timelineRows = [
     {
       item_id: 'item-1',
-      source_id: 'ynet_main',
+      source_id: 'ynet_news_page',
       title_he: 'כותרת ראשונה',
       url: 'https://www.ynet.co.il/news/article/1',
       published_at: '2026-02-27T09:00:00.000Z',
@@ -76,9 +76,9 @@ describe('GET /api/v1/story/:id — found', () => {
     },
     {
       item_id: 'item-2',
-      source_id: 'mako_news',
+      source_id: 'ynet_news_page',
       title_he: 'כותרת שנייה',
-      url: 'https://rcs.mako.co.il/article/2',
+      url: 'https://www.ynet.co.il/news/article/2',
       published_at: '2026-02-27T10:00:00.000Z',
       updated_at: null,
     },
@@ -112,7 +112,8 @@ describe('GET /api/v1/story/:id — found', () => {
       data: { story: { sources: { source_id: string; name: string; url: string }[] } };
     };
     const sources = body.data.story.sources;
-    expect(sources.length).toBe(2); // ynet_main + mako_news
+    expect(sources.length).toBe(1); // dedupe same source_id from timeline
+    expect(sources[0]?.source_id).toBe('ynet_news_page');
     expect(sources.every(s => typeof s.name === 'string')).toBe(true);
     expect(sources.every(s => typeof s.url === 'string')).toBe(true);
   });

@@ -1,6 +1,7 @@
 import type { Env } from '../index';
 import { getEnabledSources } from '../sources/registry';
 import { fetchRss } from '../ingest/rss';
+import { fetchHtmlNews } from '../ingest/html';
 import { upsertItems } from '../db/items_repo';
 import { startRun, finishRun, type RunCounters } from '../db/runs_repo';
 import { recordError } from '../db/errors_repo';
@@ -55,7 +56,7 @@ export async function runIngest(env: Env): Promise<void> {
 
   try {
     for (const source of getEnabledSources()) {
-      if (source.type !== 'rss') continue;
+      if (source.type !== 'rss' && source.type !== 'html') continue;
 
       // Stop processing sources if we're running low on time.
       // Reserve 5s: RSS fetch timeout (up to 10s for the call itself) + clustering.
@@ -63,7 +64,10 @@ export async function runIngest(env: Env): Promise<void> {
 
       try {
         const maxItems = source.throttle?.max_items_per_run ?? maxItemsPerRun;
-        const entries = await fetchRss(source.url, maxItems);
+        const entries =
+          source.type === 'rss'
+            ? await fetchRss(source.url, maxItems)
+            : await fetchHtmlNews(source.url, maxItems);
         const { found, inserted, newKeys } = await upsertItems(db, entries, source.id);
         counters.itemsFound += found;
         counters.itemsNew += inserted;

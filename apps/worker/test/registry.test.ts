@@ -5,53 +5,35 @@ import {
   getSourceById,
 } from '../src/sources/registry';
 
-describe('source registry', () => {
-  it('getAllSources returns all sources', () => {
+describe('source registry (single ynet page)', () => {
+  it('contains exactly one source', () => {
     const all = getAllSources();
-    expect(all.length).toBeGreaterThan(0);
+    expect(all).toHaveLength(1);
   });
 
-  it('getEnabledSources returns only enabled sources', () => {
-    const all = getAllSources();
+  it('the source is enabled and html type', () => {
     const enabled = getEnabledSources();
-    const disabledCount = all.filter(s => !s.enabled).length;
-    expect(enabled.length).toBe(all.length - disabledCount);
-    expect(enabled.every(s => s.enabled)).toBe(true);
+    expect(enabled).toHaveLength(1);
+    expect(enabled[0]?.id).toBe('ynet_news_page');
+    expect(enabled[0]?.type).toBe('html');
+    expect(enabled[0]?.url).toBe('https://www.ynet.co.il/news');
   });
 
-  it('ynet_rss_index is disabled', () => {
-    const src = getSourceById('ynet_rss_index');
+  it('getSourceById returns ynet_news_page', () => {
+    const src = getSourceById('ynet_news_page');
     expect(src).toBeDefined();
-    expect(src?.enabled).toBe(false);
-  });
-
-  it('getSourceById returns correct source', () => {
-    const src = getSourceById('ynet_main');
-    expect(src).toBeDefined();
-    expect(src?.name).toMatch(/ynet/);
-    expect(src?.type).toBe('rss');
+    expect(src?.name).toContain('ynet');
     expect(src?.lang).toBe('he');
   });
 
-  it('getSourceById returns undefined for unknown id', () => {
+  it('returns undefined for unknown source id', () => {
     expect(getSourceById('does_not_exist')).toBeUndefined();
   });
 
-  it('all sources have required fields', () => {
-    for (const src of getAllSources()) {
-      expect(typeof src.id).toBe('string');
-      expect(src.id.length).toBeGreaterThan(0);
-      expect(typeof src.url).toBe('string');
-      expect(src.url).toMatch(/^https?:\/\//);
-      expect(['rss', 'sitemap', 'html']).toContain(src.type);
-    }
-  });
-
-  it('all rss sources have throttle settings', () => {
-    for (const src of getAllSources().filter(s => s.type === 'rss')) {
-      expect(src.throttle).toBeDefined();
-      expect(src.throttle?.max_items_per_run).toBeGreaterThan(0);
-      expect(src.throttle?.min_interval_sec).toBeGreaterThan(0);
-    }
+  it('source has throttle settings', () => {
+    const src = getSourceById('ynet_news_page');
+    expect(src?.throttle).toBeDefined();
+    expect(src?.throttle?.max_items_per_run).toBeGreaterThan(0);
+    expect(src?.throttle?.min_interval_sec).toBeGreaterThan(0);
   });
 });
