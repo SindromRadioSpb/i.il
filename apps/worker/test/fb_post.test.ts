@@ -137,7 +137,7 @@ describe('runFbCrosspost posting behavior', () => {
     expect(result).toEqual({ posted: 1, failed: 0 });
   });
 
-  it('caption follows expert style and includes source link', async () => {
+  it('caption uses T-800 long-form style and includes links', async () => {
     const dbStub = makeDbWithStories([
       {
         story_id: 'story-2',
@@ -163,9 +163,12 @@ describe('runFbCrosspost posting behavior', () => {
     expect(photoCall).toBeDefined();
     const body = String(photoCall?.[1]?.body ?? '');
     const decoded = decodeURIComponent(body.replace(/\+/g, '%20'));
-    expect(decoded).toContain('Ближний Восток: экспертный разбор');
-    expect(decoded).toContain('Источник: https://www.ynet.co.il/news/article/abc');
-    expect(decoded).toContain('Подробно: https://news.example.com/story/story-2');
+    expect(decoded).toContain('T-800 //');
+    expect(decoded).toContain('T-800:');
+    expect(decoded).toContain('SARCASM MODULE:');
+    expect(decoded).toContain('HUMOR MODULE:');
+    expect(decoded).toContain('https://www.ynet.co.il/news/article/abc');
+    expect(decoded).toContain('https://news.example.com/story/story-2');
   });
 
   it('fails post when article has no images', async () => {

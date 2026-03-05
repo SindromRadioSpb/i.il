@@ -144,7 +144,7 @@ export async function postToFacebook(
   return postId;
 }
 
-/** Build expert-style message for Middle East context. */
+/** Build a long-form T-800 style message for Facebook. */
 function buildMessage(
   titleRu: string | null,
   summaryRu: string | null,
@@ -156,20 +156,42 @@ function buildMessage(
     .split('\n')
     .map(l => l.trim())
     .filter(Boolean);
-  const keyLines = lines
-    .filter(l => /^Что произошло:|^Почему важно:|^Что дальше:/i.test(l))
-    .slice(0, 3)
-    .map(l => `- ${l}`);
+
+  const section = (prefix: string): string | null => {
+    const line = lines.find(l => l.toLowerCase().startsWith(prefix.toLowerCase()));
+    if (!line) return null;
+    const stripped = line.replace(/^[^:]+:\s*/u, '').trim();
+    return stripped.length > 0 ? stripped : null;
+  };
+
+  const cleanBody = lines
+    .filter(l => !/^источники:/iu.test(l))
+    .map(l => l.replace(/^(заголовок|что произошло|почему важно|что дальше)\s*:\s*/iu, '').trim())
+    .filter(Boolean);
+
+  const whatHappened = section('Что произошло:') ?? cleanBody[0] ?? 'Данные уточняются.';
+  const whyImportant =
+    section('Почему важно:') ?? cleanBody[1] ?? 'Последствия для региона продолжают формироваться.';
+  const whatNext =
+    section('Что дальше:') ?? cleanBody[2] ?? 'Ожидаю обновление данных от официальных источников.';
+  const expandedComment =
+    cleanBody.length > 0
+      ? cleanBody.join(' ')
+      : 'Фактов пока немного, поэтому работаю в режиме осторожного прогноза и сверки источников.';
 
   const parts = [
-    'Ближний Восток: экспертный разбор',
-    `Тема: ${title}`,
+    'T-800 // Ближний Восток: аналитический канал активирован',
+    `Цель наблюдения: ${title}.`,
+    `Что зафиксировано: ${whatHappened}`,
+    `Почему это важно: ${whyImportant}`,
+    `Что дальше: ${whatNext}`,
+    `Развернутый комментарий T-800: ${expandedComment}`,
+    'SARCASM MODULE: человечество снова удивлено последствиями решений, которые само же и приняло.',
+    'HUMOR MODULE: я обещал вернуться, а вы снова дали мне срочные новости вместо спокойного режима.',
+    `Полный разбор: ${storyUrl}`,
   ];
-  if (keyLines.length > 0) {
-    parts.push(keyLines.join('\n'));
-  }
-  parts.push(`Подробно: ${storyUrl}`);
-  if (sourceUrl) parts.push(`Источник: ${sourceUrl}`);
+
+  if (sourceUrl) parts.push(`Источник сигнала: ${sourceUrl}`);
   return parts.join('\n\n');
 }
 
